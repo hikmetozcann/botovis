@@ -14,7 +14,10 @@ import type {
   ActionResult,
   SchemaTable,
   SuggestedAction,
+  ConversationSummary,
 } from './types';
+
+export type ViewMode = 'chat' | 'history';
 
 export class BotovisChat extends HTMLElement {
 
@@ -36,6 +39,11 @@ export class BotovisChat extends HTMLElement {
   private schemaTables: SchemaTable[] = [];
   private darkMediaQuery: MediaQueryList | null = null;
   private boundKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+  
+  // Conversation history
+  private viewMode: ViewMode = 'chat';
+  private conversations: ConversationSummary[] = [];
+  private isLoadingHistory = false;
 
   constructor() {
     super();
@@ -153,11 +161,18 @@ export class BotovisChat extends HTMLElement {
       <div class="bv-panel" id="panel">
         <div class="bv-header">
           <span class="bv-header-title">${this.esc(this.cfg.title)}</span>
+          <button class="bv-header-btn" id="btn-history" title="${this.i('conversations')}">${icons.clock}</button>
+          <button class="bv-header-btn" id="btn-new" title="${this.i('newConversation')}">${icons.plus}</button>
           <button class="bv-header-btn" id="btn-reset" title="${this.i('reset')}">${icons.refresh}</button>
           <button class="bv-header-btn" id="btn-close" title="${this.i('close')}">${icons.minimize}</button>
         </div>
-        <div class="bv-messages" id="messages">
-          ${this.renderEmptyState()}
+        <div class="bv-view-container">
+          <div class="bv-messages" id="messages">
+            ${this.renderEmptyState()}
+          </div>
+          <div class="bv-history" id="history" style="display: none;">
+            ${this.renderHistoryContent()}
+          </div>
         </div>
         <div class="bv-input-area">
           <textarea class="bv-textarea" id="input"
@@ -172,6 +187,55 @@ export class BotovisChat extends HTMLElement {
         </div>
       </div>
     `;
+  }
+
+  private renderHistoryContent(): string {
+    if (this.isLoadingHistory) {
+      return `<div class="bv-history-loading">${this.i('loadingConversations')}</div>`;
+    }
+
+    if (this.conversations.length === 0) {
+      return `
+        <div class="bv-history-empty">
+          <div class="bv-history-empty-icon">${icons.messageSquare}</div>
+          <div class="bv-history-empty-text">${this.i('noConversations')}</div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="bv-history-list">
+        ${this.conversations.map(conv => `
+          <div class="bv-history-item" data-action="select-conversation" data-id="${conv.id}">
+            <div class="bv-history-item-content">
+              <div class="bv-history-item-title">${this.esc(conv.title)}</div>
+              <div class="bv-history-item-preview">${conv.last_message ? this.esc(conv.last_message.substring(0, 60)) : ''}</div>
+              <div class="bv-history-item-meta">${this.formatDate(conv.updated_at)} · ${conv.message_count} mesaj</div>
+            </div>
+            <button class="bv-history-item-delete" data-action="delete-conversation" data-id="${conv.id}" title="${this.i('deleteConversation')}">
+              ${icons.trash}
+            </button>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  private formatDate(dateStr: string): string {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    
+    if (days === 0) {
+      return date.toLocaleTimeString(this.locale, { hour: '2-digit', minute: '2-digit' });
+    } else if (days === 1) {
+      return this.locale === 'tr' ? 'Dün' : 'Yesterday';
+    } else if (days < 7) {
+      return date.toLocaleDateString(this.locale, { weekday: 'short' });
+    } else {
+      return date.toLocaleDateString(this.locale, { day: 'numeric', month: 'short' });
+    }
   }
 
   private renderEmptyState(): string {
@@ -220,12 +284,23 @@ export class BotovisChat extends HTMLElement {
       if (id === 'btn-close') this.close();
       if (id === 'btn-send')  this.handleSend();
       if (id === 'btn-reset') this.handleReset();
+      if (id === 'btn-history') this.toggleHistory();
+      if (id === 'btn-new') this.startNewConversation();
 
       if (action === 'confirm') this.handleConfirm();
       if (action === 'reject')  this.handleReject();
       if (action === 'suggest') {
         const msg = btn.dataset.message;
         if (msg) this.send(msg);
+      }
+      if (action === 'select-conversation') {
+        const convId = btn.dataset.id;
+        if (convId) this.loadConversation(convId);
+      }
+      if (action === 'delete-conversation') {
+        e.stopPropagation();
+        const convId = btn.dataset.id;
+        if (convId) this.deleteConversation(convId);
       }
     });
 
@@ -494,6 +569,26 @@ export class BotovisChat extends HTMLElement {
     }
   }
 
+  /**
+   * Re-render all messages in the container.
+   * Used when loading a conversation from history or starting a new one.
+   */
+  private renderMessages(): void {
+    const container = this.$('messages');
+    if (!container) return;
+
+    if (this.messages.length === 0) {
+      container.innerHTML = this.renderEmptyState();
+      return;
+    }
+
+    container.innerHTML = this.messages
+      .map(msg => this.renderMessage(msg))
+      .join('');
+
+    this.scrollToBottom();
+  }
+
   // ── Message Rendering ──────────────────────────
 
   private renderMessage(msg: ChatMessage): string {
@@ -722,17 +817,20 @@ export class BotovisChat extends HTMLElement {
   private generateSuggestions(): SuggestedAction[] {
     const actions: SuggestedAction[] = [];
     for (const table of this.schemaTables.slice(0, 4)) {
-      if (table.actions.includes('read')) {
+      const tableActions = table.actions || table.allowed_actions || [];
+      const tableName = table.table || table.name || '';
+      
+      if (tableActions.includes('read')) {
         actions.push({
-          label: this.i('listAll', { table: table.table }),
-          message: `${table.table} listele`,
+          label: this.i('listAll', { table: tableName }),
+          message: `${tableName} listele`,
           icon: icons.search,
         });
       }
-      if (table.actions.includes('create') && actions.length < 6) {
+      if (tableActions.includes('create') && actions.length < 6) {
         actions.push({
-          label: this.i('addNew', { table: table.table }),
-          message: `Yeni ${table.table} ekle`,
+          label: this.i('addNew', { table: tableName }),
+          message: `Yeni ${tableName} ekle`,
           icon: icons.plus,
         });
       }
@@ -755,6 +853,146 @@ export class BotovisChat extends HTMLElement {
       el.classList.add('bv-toast-exit');
       setTimeout(() => el.remove(), 300);
     }, 3000);
+  }
+
+  // ── Conversation History ───────────────────────
+
+  private async toggleHistory(): Promise<void> {
+    if (this.viewMode === 'chat') {
+      this.viewMode = 'history';
+      this.showHistoryView();
+      await this.fetchConversations();
+    } else {
+      this.viewMode = 'chat';
+      this.showChatView();
+    }
+  }
+
+  private showHistoryView(): void {
+    const messages = this.$('messages');
+    const history = this.$('history');
+    const inputArea = this.shadow.querySelector('.bv-input-area') as HTMLElement;
+    const inputHint = this.shadow.querySelector('.bv-input-hint') as HTMLElement;
+    
+    if (messages) messages.style.display = 'none';
+    if (history) history.style.display = 'block';
+    if (inputArea) inputArea.style.display = 'none';
+    if (inputHint) inputHint.style.display = 'none';
+    
+    // Update header title
+    const title = this.shadow.querySelector('.bv-header-title');
+    if (title) title.textContent = this.i('conversations');
+    
+    // Update history button to back
+    const historyBtn = this.$('btn-history');
+    if (historyBtn) {
+      historyBtn.innerHTML = icons.arrowLeft;
+      historyBtn.title = this.i('backToChat');
+    }
+  }
+
+  private showChatView(): void {
+    const messages = this.$('messages');
+    const history = this.$('history');
+    const inputArea = this.shadow.querySelector('.bv-input-area') as HTMLElement;
+    const inputHint = this.shadow.querySelector('.bv-input-hint') as HTMLElement;
+    
+    if (messages) messages.style.display = 'flex';
+    if (history) history.style.display = 'none';
+    if (inputArea) inputArea.style.display = 'flex';
+    if (inputHint) inputHint.style.display = 'flex';
+    
+    // Update header title
+    const title = this.shadow.querySelector('.bv-header-title');
+    if (title) title.textContent = this.cfg.title;
+    
+    // Update back button to history
+    const historyBtn = this.$('btn-history');
+    if (historyBtn) {
+      historyBtn.innerHTML = icons.clock;
+      historyBtn.title = this.i('conversations');
+    }
+  }
+
+  private async fetchConversations(): Promise<void> {
+    this.isLoadingHistory = true;
+    this.updateHistoryView();
+
+    try {
+      const response = await this.api.getConversations();
+      this.conversations = response.conversations;
+    } catch (err) {
+      console.error('Failed to fetch conversations:', err);
+      this.conversations = [];
+    } finally {
+      this.isLoadingHistory = false;
+      this.updateHistoryView();
+    }
+  }
+
+  private updateHistoryView(): void {
+    const history = this.$('history');
+    if (history) {
+      history.innerHTML = this.renderHistoryContent();
+    }
+  }
+
+  private async loadConversation(id: string): Promise<void> {
+    try {
+      const response = await this.api.getConversation(id);
+      const conv = response.conversation;
+      
+      this.conversationId = conv.id;
+      this.messages = conv.messages.map(m => ({
+        id: m.id,
+        role: m.role as 'user' | 'assistant',
+        type: m.role === 'user' ? 'text' : (m.success === false ? 'error' : 'text'),
+        content: m.content,
+        timestamp: new Date(m.created_at),
+      }));
+      
+      // Switch to chat view
+      this.viewMode = 'chat';
+      this.showChatView();
+      this.renderMessages();
+    } catch (err) {
+      console.error('Failed to load conversation:', err);
+      this.toast(this.i('error'), 'error');
+    }
+  }
+
+  private async deleteConversation(id: string): Promise<void> {
+    try {
+      await this.api.deleteConversation(id);
+      this.conversations = this.conversations.filter(c => c.id !== id);
+      this.updateHistoryView();
+      this.toast(this.i('conversationDeleted'), 'success');
+      
+      // If we deleted the current conversation, reset
+      if (this.conversationId === id) {
+        this.conversationId = null;
+        this.messages = [];
+        this.renderMessages();
+      }
+    } catch (err) {
+      console.error('Failed to delete conversation:', err);
+      this.toast(this.i('error'), 'error');
+    }
+  }
+
+  private startNewConversation(): void {
+    this.conversationId = null;
+    this.messages = [];
+    this.hasPending = false;
+    
+    // If in history view, switch to chat
+    if (this.viewMode === 'history') {
+      this.viewMode = 'chat';
+      this.showChatView();
+    }
+    
+    this.renderMessages();
+    this.$('input')?.focus();
   }
 
   // ── Sound ──────────────────────────────────────

@@ -82,3 +82,40 @@ export interface SuggestedAction {
   message: string;
   icon: string;
 }
+
+// ── Conversation Types ───────────────────────────
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  message_count: number;
+  last_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: MessageRole;
+  content: string;
+  intent: string | null;
+  action: string | null;
+  success: boolean | null;
+  created_at: string;
+}
+
+export interface ConversationDetail {
+  id: string;
+  title: string;
+  messages: ConversationMessage[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationListResponse {
+  conversations: ConversationSummary[];
+}
+
+export interface ConversationResponse {
+  conversation: ConversationDetail;
+}

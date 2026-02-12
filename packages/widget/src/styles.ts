@@ -757,6 +757,125 @@ export const styles = /*css*/`
   to { opacity: 0; }
 }
 
+/* ── Conversation History ─────────────────── */
+
+.bv-view-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bv-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.bv-history-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--bv-text-muted);
+}
+
+.bv-history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.bv-history-empty-icon {
+  color: var(--bv-text-muted);
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.bv-history-empty-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.bv-history-empty-text {
+  color: var(--bv-text-muted);
+  font-size: 13px;
+}
+
+.bv-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bv-history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--bv-radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 1px solid transparent;
+}
+
+.bv-history-item:hover {
+  background: var(--bv-surface-hover);
+}
+
+.bv-history-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.bv-history-item-title {
+  font-weight: 500;
+  color: var(--bv-text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bv-history-item-preview {
+  color: var(--bv-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.bv-history-item-meta {
+  color: var(--bv-text-muted);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.bv-history-item-delete {
+  opacity: 0;
+  padding: 6px;
+  background: none;
+  border: none;
+  color: var(--bv-text-muted);
+  cursor: pointer;
+  border-radius: var(--bv-radius-xs);
+  transition: all 0.15s;
+}
+
+.bv-history-item:hover .bv-history-item-delete {
+  opacity: 1;
+}
+
+.bv-history-item-delete:hover {
+  background: var(--bv-error-bg);
+  color: var(--bv-error);
+}
+
 /* ── Responsive (Mobile) ──────────────────── */
 
 @media (max-width: 480px) {

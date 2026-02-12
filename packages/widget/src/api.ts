@@ -2,7 +2,7 @@
 //  Botovis Widget — REST API Client
 // ─────────────────────────────────────────────────
 
-import type { ApiResponse, SchemaResponse } from './types';
+import type { ApiResponse, SchemaResponse, ConversationListResponse, ConversationResponse } from './types';
 
 export class BotovisApi {
   private csrfToken: string | null;
@@ -41,6 +41,28 @@ export class BotovisApi {
 
   async getStatus(): Promise<{ status: string }> {
     return this.get('/status');
+  }
+
+  // ── Conversation Management ─────────────────────
+
+  async getConversations(): Promise<ConversationListResponse> {
+    return this.get<ConversationListResponse>('/conversations');
+  }
+
+  async getConversation(id: string): Promise<ConversationResponse> {
+    return this.get<ConversationResponse>(`/conversations/${id}`);
+  }
+
+  async createConversation(title?: string): Promise<ConversationResponse> {
+    return this.post<ConversationResponse>('/conversations', { title });
+  }
+
+  async deleteConversation(id: string): Promise<void> {
+    await this.delete(`/conversations/${id}`);
+  }
+
+  async updateConversationTitle(id: string, title: string): Promise<void> {
+    await this.patch(`/conversations/${id}/title`, { title });
   }
 
   updateCsrfToken(token: string): void {
@@ -102,6 +124,17 @@ export class BotovisApi {
 
   private get<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'GET' });
+  }
+
+  private delete<T>(path: string): Promise<T> {
+    return this.request<T>(path, { method: 'DELETE' });
+  }
+
+  private patch<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    return this.request<T>(path, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
   }
 
   private detectCsrfFromMeta(): string | null {

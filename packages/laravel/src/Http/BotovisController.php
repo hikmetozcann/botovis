@@ -9,9 +9,12 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Botovis\Core\Orchestrator;
 use Botovis\Core\Contracts\SchemaDiscoveryInterface;
+use Botovis\Core\Contracts\ConversationRepositoryInterface;
+use Botovis\Core\DTO\Message;
 use Botovis\Laravel\Security\BotovisAuthorizer;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
+use DateTimeImmutable;
 
 /**
  * HTTP API for the Botovis chat widget.
@@ -29,6 +32,7 @@ class BotovisController extends Controller
     public function __construct(
         private readonly Orchestrator $orchestrator,
         private readonly BotovisAuthorizer $authorizer,
+        private readonly ?ConversationRepositoryInterface $conversationRepository = null,
     ) {
         // Inject authorizer into orchestrator
         $this->orchestrator->setAuthorizer($this->authorizer);
@@ -48,13 +52,70 @@ class BotovisController extends Controller
 
         $request->validate([
             'message' => 'required|string|max:2000',
-            'conversation_id' => 'nullable|string|max:64',
+            'conversation_id' => 'nullable|string|uuid',
         ]);
 
         $message = $request->input('message');
-        $conversationId = $request->input('conversation_id') ?? $this->generateConversationId($request);
+        $userId = $this->getUserId();
 
+        // Get or create conversation
+        $conversationId = $request->input('conversation_id');
+        $isNewConversation = false;
+
+        if ($conversationId && $this->conversationRepository) {
+            // Verify ownership
+            if (!$this->conversationRepository->belongsToUser($conversationId, $userId)) {
+                return response()->json([
+                    'type' => 'error',
+                    'message' => 'Sohbet bulunamadı.',
+                ], 404);
+            }
+        } elseif ($this->conversationRepository) {
+            // Create new conversation
+            $conversation = $this->conversationRepository->createConversation($userId, 'Yeni Sohbet');
+            $conversationId = $conversation->id;
+            $isNewConversation = true;
+        } else {
+            // No repository - use simple ID
+            $conversationId = $this->generateConversationId($request);
+        }
+
+        $startTime = microtime(true);
+
+        // Save user message
+        if ($this->conversationRepository) {
+            $this->conversationRepository->addMessage(Message::user(
+                Str::uuid()->toString(),
+                $conversationId,
+                $message,
+            ));
+        }
+
+        // Process with orchestrator
         $response = $this->orchestrator->handle($conversationId, $message);
+        $executionTimeMs = (int) ((microtime(true) - $startTime) * 1000);
+
+        // Save assistant response
+        if ($this->conversationRepository) {
+            $this->conversationRepository->addMessage(Message::assistant(
+                Str::uuid()->toString(),
+                $conversationId,
+                $response->message,
+                intent: $response->type,
+                action: $response->intent?->action ?? null,
+                table: $response->intent?->table ?? null,
+                parameters: $response->intent?->data ?? [],
+                success: $response->type !== 'error',
+                executionTimeMs: $executionTimeMs,
+            ));
+
+            // Auto-generate title from first message
+            if ($isNewConversation && strlen($message) > 0) {
+                $title = mb_substr($message, 0, 50);
+                if (mb_strlen($message) > 50) $title .= '...';
+                $this->conversationRepository->updateTitle($conversationId, $title);
+            }
+        }
 
         return response()->json([
             'conversation_id' => $conversationId,
@@ -218,5 +279,16 @@ class BotovisController extends Controller
     {
         $userId = $request->user()?->getAuthIdentifier() ?? 'guest';
         return 'botovis_' . $userId . '_' . Str::random(8);
+    }
+
+    /**
+     * Get current user's ID.
+     */
+    private function getUserId(): ?string
+    {
+        $guard = config('botovis.security.guard', 'web');
+        $user = Auth::guard($guard)->user();
+
+        return $user?->getAuthIdentifier() ? (string) $user->getAuthIdentifier() : null;
     }
 }

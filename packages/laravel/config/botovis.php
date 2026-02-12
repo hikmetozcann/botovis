@@ -153,4 +153,45 @@ return [
         'middleware' => ['web'],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Conversation History
+    |--------------------------------------------------------------------------
+    |
+    | Configure how conversation history is stored and managed.
+    |
+    */
+    'conversations' => [
+        /*
+        | Enable conversation history persistence
+        | When disabled, conversations are not saved
+        */
+        'enabled' => true,
+
+        /*
+        | Storage driver for conversations
+        | Options:
+        |   'database' - Store in botovis_conversations/messages tables (requires migration)
+        |   'session'  - Store in PHP session (cleared when session ends)
+        */
+        'driver' => env('BOTOVIS_CONVERSATION_DRIVER', 'database'),
+
+        /*
+        | Auto-generate conversation title from first message
+        */
+        'auto_title' => true,
+
+        /*
+        | Maximum number of messages to include as context for LLM
+        | More messages = better context but higher token usage
+        */
+        'context_messages' => 10,
+
+        /*
+        | Maximum conversations per user (0 = unlimited)
+        | Oldest conversations will be deleted when limit is reached
+        */
+        'max_per_user' => 0,
+    ],
+
 ];

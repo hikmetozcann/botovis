@@ -11,12 +11,15 @@ use Botovis\Core\Contracts\SchemaDiscoveryInterface;
 use Botovis\Core\Contracts\LlmDriverInterface;
 use Botovis\Core\Contracts\ActionExecutorInterface;
 use Botovis\Core\Contracts\ConversationManagerInterface;
+use Botovis\Core\Contracts\ConversationRepositoryInterface;
 use Botovis\Core\Intent\IntentResolver;
 use Botovis\Core\Orchestrator;
 use Botovis\Laravel\Schema\EloquentSchemaDiscovery;
 use Botovis\Laravel\Llm\LlmDriverFactory;
 use Botovis\Laravel\Action\EloquentActionExecutor;
 use Botovis\Laravel\Conversation\CacheConversationManager;
+use Botovis\Laravel\Repositories\EloquentConversationRepository;
+use Botovis\Laravel\Repositories\SessionConversationRepository;
 use Botovis\Laravel\Security\BotovisAuthorizer;
 use Botovis\Laravel\Commands\DiscoverCommand;
 use Botovis\Laravel\Commands\ChatCommand;
@@ -61,6 +64,22 @@ class BotovisServiceProvider extends ServiceProvider
             return new BotovisAuthorizer();
         });
 
+        // ── Conversation Repository ──
+
+        $this->app->singleton(ConversationRepositoryInterface::class, function ($app) {
+            $enabled = config('botovis.conversations.enabled', true);
+            if (!$enabled) {
+                return null;
+            }
+
+            $driver = config('botovis.conversations.driver', 'database');
+
+            return match ($driver) {
+                'session' => new SessionConversationRepository(),
+                default => new EloquentConversationRepository(),
+            };
+        });
+
         // ── Orchestrator (used by both CLI and HTTP) ──
 
         $this->app->singleton(Orchestrator::class, function ($app) {
@@ -81,6 +100,16 @@ class BotovisServiceProvider extends ServiceProvider
         $this->publishes([
             __DIR__ . '/../config/botovis.php' => config_path('botovis.php'),
         ], 'botovis-config');
+
+        // ── Migration publishing ──
+        if ($this->app->runningInConsole()) {
+            $this->publishes([
+                __DIR__ . '/../database/migrations' => database_path('migrations'),
+            ], 'botovis-migrations');
+
+            // Also load migrations directly (so users don't have to publish)
+            $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        }
 
         // ── Widget asset publishing ──
         $widgetDist = realpath(__DIR__ . '/../../widget/dist');

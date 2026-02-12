@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use Botovis\Laravel\Http\BotovisController;
+use Botovis\Laravel\Http\ConversationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -15,9 +16,17 @@ use Botovis\Laravel\Http\BotovisController;
 |
 */
 
+// Chat endpoints
 Route::post('/chat', [BotovisController::class, 'chat']);
 Route::post('/confirm', [BotovisController::class, 'confirm']);
 Route::post('/reject', [BotovisController::class, 'reject']);
 Route::post('/reset', [BotovisController::class, 'reset']);
 Route::get('/schema', [BotovisController::class, 'schema']);
 Route::get('/status', [BotovisController::class, 'status']);
+
+// Conversation management
+Route::get('/conversations', [ConversationController::class, 'index']);
+Route::post('/conversations', [ConversationController::class, 'store']);
+Route::get('/conversations/{id}', [ConversationController::class, 'show']);
+Route::delete('/conversations/{id}', [ConversationController::class, 'destroy']);
+Route::patch('/conversations/{id}/title', [ConversationController::class, 'updateTitle']);

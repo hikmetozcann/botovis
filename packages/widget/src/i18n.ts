@@ -43,6 +43,14 @@ const translations: Record<Locale, Record<string, string>> = {
     shortcutNewline: 'Yeni satır',
     shortcutClose: 'Kapat',
     comingSoon: 'Yakında',
+    // Conversation history
+    conversations: 'Sohbetler',
+    newConversation: 'Yeni Sohbet',
+    backToChat: 'Sohbete Dön',
+    noConversations: 'Henüz sohbet yok',
+    loadingConversations: 'Yükleniyor...',
+    deleteConversation: 'Sohbeti sil',
+    conversationDeleted: 'Sohbet silindi',
   },
   en: {
     title: 'Botovis Assistant',
@@ -82,6 +90,14 @@ const translations: Record<Locale, Record<string, string>> = {
     shortcutNewline: 'New line',
     shortcutClose: 'Close',
     comingSoon: 'Coming soon',
+    // Conversation history
+    conversations: 'Conversations',
+    newConversation: 'New Chat',
+    backToChat: 'Back to Chat',
+    noConversations: 'No conversations yet',
+    loadingConversations: 'Loading...',
+    deleteConversation: 'Delete conversation',
+    conversationDeleted: 'Conversation deleted',
   },
 };
 
