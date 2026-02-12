@@ -17,6 +17,7 @@ use Botovis\Laravel\Schema\EloquentSchemaDiscovery;
 use Botovis\Laravel\Llm\LlmDriverFactory;
 use Botovis\Laravel\Action\EloquentActionExecutor;
 use Botovis\Laravel\Conversation\CacheConversationManager;
+use Botovis\Laravel\Security\BotovisAuthorizer;
 use Botovis\Laravel\Commands\DiscoverCommand;
 use Botovis\Laravel\Commands\ChatCommand;
 
@@ -52,6 +53,12 @@ class BotovisServiceProvider extends ServiceProvider
 
         $this->app->singleton(ConversationManagerInterface::class, function ($app) {
             return new CacheConversationManager();
+        });
+
+        // ── Security / Authorization ──
+
+        $this->app->singleton(BotovisAuthorizer::class, function ($app) {
+            return new BotovisAuthorizer();
         });
 
         // ── Orchestrator (used by both CLI and HTTP) ──

@@ -53,19 +53,94 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Security
+    | Security & Authorization
     |--------------------------------------------------------------------------
     |
-    | respect_policies: When true, Botovis checks Laravel Gates/Policies
-    |                   before executing any action.
-    |
-    | require_confirmation: Actions that need user confirmation before executing.
-    |                       'read' actions never require confirmation.
+    | Configure how Botovis handles user authentication and authorization.
+    | Botovis uses your existing Laravel auth system — no separate users.
     |
     */
     'security' => [
-        'respect_policies' => true,
+        /*
+        | Authentication guard to use (from config/auth.php)
+        | Set to null to disable auth (not recommended for production)
+        */
+        'guard' => 'web',
+
+        /*
+        | Require authentication for all Botovis endpoints
+        | If false, unauthenticated users can still use Botovis (based on permissions)
+        */
+        'require_auth' => true,
+
+        /*
+        | Actions that require user confirmation before executing
+        | 'read' actions never require confirmation regardless of this setting
+        */
         'require_confirmation' => ['create', 'update', 'delete'],
+
+        /*
+        | Use Laravel Gates/Policies for authorization
+        | When enabled, checks if user can('botovis.{table}.{action}')
+        */
+        'use_gates' => false,
+
+        /*
+        | Role-based permissions
+        | Define which tables/actions each role can access
+        | Use '*' for all tables or all actions
+        |
+        | Format:
+        |   'role_name' => [
+        |       'table_name' => ['create', 'read', 'update', 'delete'],
+        |       '*' => ['read'],  // all tables, read only
+        |   ],
+        |
+        | Special roles:
+        |   '*' => [...] applies to all authenticated users (default permissions)
+        */
+        'roles' => [
+            // Example configurations:
+            //
+            // 'admin' => [
+            //     '*' => ['create', 'read', 'update', 'delete'],
+            // ],
+            //
+            // 'manager' => [
+            //     'employees' => ['create', 'read', 'update'],
+            //     'positions' => ['read', 'update'],
+            //     'shift_templates' => ['read'],
+            // ],
+            //
+            // 'user' => [
+            //     '*' => ['read'],
+            // ],
+            //
+            // Default: all authenticated users get full access
+            '*' => [
+                '*' => ['create', 'read', 'update', 'delete'],
+            ],
+        ],
+
+        /*
+        | How to determine user's role
+        | Options:
+        |   'attribute' - Use $user->{role_attribute} (e.g., $user->role)
+        |   'method'    - Call $user->{role_method}() (e.g., $user->getRole())
+        |   'spatie'    - Use Spatie Permission package ($user->getRoleNames())
+        |   'callback'  - Use custom callback function
+        */
+        'role_resolver' => 'attribute',
+        'role_attribute' => 'role',
+        'role_method' => 'getRole',
+        // 'role_callback' => fn($user) => $user->roles->first()?->name ?? 'user',
+
+        /*
+        | Custom authorization callback (overrides role-based if set)
+        | Return true to allow, false to deny
+        | fn(User $user, string $table, string $action): bool
+        */
+        // 'authorize_callback' => null,
     ],
 
     /*
@@ -75,7 +150,7 @@ return [
     */
     'route' => [
         'prefix' => 'botovis',
-        'middleware' => ['web', 'auth'],
+        'middleware' => ['web'],
     ],
 
 ];

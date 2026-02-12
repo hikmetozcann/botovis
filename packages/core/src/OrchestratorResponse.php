@@ -76,6 +76,19 @@ class OrchestratorResponse
         );
     }
 
+    public static function unauthorized(string $reason, ?string $suggestion = null): self
+    {
+        $message = $reason;
+        if ($suggestion) {
+            $message .= ' ' . $suggestion;
+        }
+
+        return new self(
+            type: 'unauthorized',
+            message: $message,
+        );
+    }
+
     /**
      * Prepend an intermediate auto-continue step.
      */

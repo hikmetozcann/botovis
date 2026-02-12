@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Botovis\Core\Intent;
 
 use Botovis\Core\Contracts\LlmDriverInterface;
+use Botovis\Core\DTO\SecurityContext;
 use Botovis\Core\Enums\ActionType;
 use Botovis\Core\Enums\IntentType;
 use Botovis\Core\Schema\DatabaseSchema;
@@ -16,10 +17,21 @@ use Botovis\Core\Schema\DatabaseSchema;
  */
 class IntentResolver
 {
+    private ?SecurityContext $securityContext = null;
+
     public function __construct(
         private readonly LlmDriverInterface $llm,
         private readonly DatabaseSchema $schema,
     ) {}
+
+    /**
+     * Set security context for permission-aware prompts
+     */
+    public function setSecurityContext(SecurityContext $context): self
+    {
+        $this->securityContext = $context;
+        return $this;
+    }
 
     /**
      * Resolve a user message into a structured intent.
@@ -47,19 +59,23 @@ class IntentResolver
     private function buildSystemPrompt(): string
     {
         $schemaContext = $this->schema->toPromptContext();
+        $userContext = $this->buildUserContext();
 
         return <<<PROMPT
 You are Botovis, an AI assistant embedded in a web application. Your job is to understand user requests and convert them into structured database operations.
 
+{$userContext}
+
 RULES:
 1. You can ONLY operate on the tables listed below. If the user asks about a table not listed, say you don't have access.
 2. You can ONLY perform the allowed actions for each table. If CREATE is not allowed, you cannot create records.
-3. Always respond with VALID JSON only. No extra text before or after the JSON.
-4. Column names and table names must match EXACTLY as listed in the schema.
-5. For UPDATE and DELETE, you MUST include "where" conditions to identify the record(s).
-6. If user's request is ambiguous or missing required information, ask for clarification.
-7. Use the "fillable" columns only for CREATE/UPDATE data — never write to non-fillable columns.
-8. AUTONOMOUS MULTI-STEP: If the user's request requires looking up data first before performing an action
+3. RESPECT USER PERMISSIONS: Check the user's allowed actions before suggesting any operation. If user cannot perform an action, politely explain they don't have permission.
+4. Always respond with VALID JSON only. No extra text before or after the JSON.
+5. Column names and table names must match EXACTLY as listed in the schema.
+6. For UPDATE and DELETE, you MUST include "where" conditions to identify the record(s).
+7. If user's request is ambiguous or missing required information, ask for clarification.
+8. Use the "fillable" columns only for CREATE/UPDATE data — never write to non-fillable columns.
+9. AUTONOMOUS MULTI-STEP: If the user's request requires looking up data first before performing an action
    (e.g. "find the manager position and assign it to Yusuf"), you MUST set "auto_continue": true on the
    READ step. The system will execute the READ, feed the results back to you, and you should immediately
    proceed with the next action using the data you found. Do NOT ask the user to confirm READ prerequisites
@@ -110,6 +126,39 @@ When you need more info:
 
 IMPORTANT: Respond ONLY with the JSON object. No markdown, no extra text.
 PROMPT;
+    }
+
+    /**
+     * Build user context with permissions info for the LLM
+     */
+    private function buildUserContext(): string
+    {
+        if (!$this->securityContext || $this->securityContext->isGuest()) {
+            return "CURRENT USER: Guest (unauthenticated)";
+        }
+
+        $ctx = $this->securityContext;
+        $lines = ["CURRENT USER:"];
+        $lines[] = "- Role: " . ($ctx->userRole ?? 'unknown');
+        
+        if (!empty($ctx->metadata['user_name'])) {
+            $lines[] = "- Name: " . $ctx->metadata['user_name'];
+        }
+
+        // List accessible tables with their allowed actions
+        $tables = $ctx->getAccessibleTables();
+        if (in_array('*', $tables, true)) {
+            $lines[] = "- Access: Full access to all tables";
+        } else {
+            $lines[] = "- Accessible tables:";
+            foreach ($tables as $table) {
+                $actions = $ctx->getAllowedActions($table);
+                $actionsStr = in_array('*', $actions, true) ? 'all' : implode(', ', $actions);
+                $lines[] = "  - {$table}: {$actionsStr}";
+            }
+        }
+
+        return implode("\n", $lines);
     }
 
     /**

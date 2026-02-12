@@ -9,7 +9,9 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Botovis\Core\Orchestrator;
 use Botovis\Core\Contracts\SchemaDiscoveryInterface;
+use Botovis\Laravel\Security\BotovisAuthorizer;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * HTTP API for the Botovis chat widget.
@@ -26,7 +28,11 @@ class BotovisController extends Controller
 {
     public function __construct(
         private readonly Orchestrator $orchestrator,
-    ) {}
+        private readonly BotovisAuthorizer $authorizer,
+    ) {
+        // Inject authorizer into orchestrator
+        $this->orchestrator->setAuthorizer($this->authorizer);
+    }
 
     /**
      * POST /botovis/chat
@@ -36,6 +42,10 @@ class BotovisController extends Controller
      */
     public function chat(Request $request): JsonResponse
     {
+        // Check authentication if required
+        $authError = $this->checkAuth();
+        if ($authError) return $authError;
+
         $request->validate([
             'message' => 'required|string|max:2000',
             'conversation_id' => 'nullable|string|max:64',
@@ -59,6 +69,9 @@ class BotovisController extends Controller
      */
     public function confirm(Request $request): JsonResponse
     {
+        $authError = $this->checkAuth();
+        if ($authError) return $authError;
+
         $request->validate([
             'conversation_id' => 'required|string|max:64',
         ]);
@@ -79,6 +92,9 @@ class BotovisController extends Controller
      */
     public function reject(Request $request): JsonResponse
     {
+        $authError = $this->checkAuth();
+        if ($authError) return $authError;
+
         $request->validate([
             'conversation_id' => 'required|string|max:64',
         ]);
@@ -99,6 +115,9 @@ class BotovisController extends Controller
      */
     public function reset(Request $request): JsonResponse
     {
+        $authError = $this->checkAuth();
+        if ($authError) return $authError;
+
         $request->validate([
             'conversation_id' => 'required|string|max:64',
         ]);
@@ -117,10 +136,15 @@ class BotovisController extends Controller
      * GET /botovis/schema
      *
      * Returns the discovered schema for the widget to show capabilities.
+     * Filtered based on user permissions.
      */
     public function schema(SchemaDiscoveryInterface $discovery): JsonResponse
     {
+        $authError = $this->checkAuth();
+        if ($authError) return $authError;
+
         $schema = $discovery->discover();
+        $context = $this->authorizer->buildContext();
 
         $tables = array_map(function ($table) {
             return [
@@ -135,8 +159,16 @@ class BotovisController extends Controller
             ];
         }, $schema->tables);
 
+        // Filter tables based on user permissions
+        $filteredTables = $this->authorizer->filterSchema($tables, $context);
+
         return response()->json([
-            'tables' => $tables,
+            'tables' => $filteredTables,
+            'user' => [
+                'id' => $context->userId,
+                'role' => $context->userRole,
+                'authenticated' => $context->isAuthenticated(),
+            ],
         ]);
     }
 
@@ -145,10 +177,38 @@ class BotovisController extends Controller
      */
     public function status(): JsonResponse
     {
+        $context = $this->authorizer->buildContext();
+
         return response()->json([
             'status' => 'ok',
             'version' => '0.1.0',
+            'authenticated' => $context->isAuthenticated(),
+            'user_role' => $context->userRole,
         ]);
+    }
+
+    /**
+     * Check if authentication is required and user is authenticated
+     */
+    private function checkAuth(): ?JsonResponse
+    {
+        $requireAuth = config('botovis.security.require_auth', true);
+        
+        if (!$requireAuth) {
+            return null;
+        }
+
+        $guard = config('botovis.security.guard', 'web');
+        $user = Auth::guard($guard)->user();
+
+        if (!$user) {
+            return response()->json([
+                'type' => 'unauthorized',
+                'message' => 'Bu özelliği kullanmak için giriş yapmalısınız.',
+            ], 401);
+        }
+
+        return null;
     }
 
     /**

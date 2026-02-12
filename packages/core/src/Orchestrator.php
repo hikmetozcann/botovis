@@ -6,8 +6,10 @@ namespace Botovis\Core;
 
 use Botovis\Core\Contracts\ActionExecutorInterface;
 use Botovis\Core\Contracts\ActionResult;
+use Botovis\Core\Contracts\AuthorizerInterface;
 use Botovis\Core\Contracts\ConversationManagerInterface;
 use Botovis\Core\Conversation\ConversationState;
+use Botovis\Core\DTO\SecurityContext;
 use Botovis\Core\Intent\IntentResolver;
 use Botovis\Core\Intent\ResolvedIntent;
 use Botovis\Core\Enums\IntentType;
@@ -16,7 +18,7 @@ use Botovis\Core\Enums\IntentType;
  * The Botovis Orchestrator — the brain that ties everything together.
  *
  * Handles the full conversation flow:
- *   User message → Intent Resolution → Execution → Auto-continue → Response
+ *   User message → Intent Resolution → Authorization → Execution → Response
  *
  * Both the terminal command and HTTP controller delegate to this class.
  * The Orchestrator is framework-agnostic and I/O-agnostic.
@@ -25,11 +27,50 @@ class Orchestrator
 {
     private const MAX_AUTO_STEPS = 3;
 
+    private ?AuthorizerInterface $authorizer = null;
+    private ?SecurityContext $securityContext = null;
+
     public function __construct(
         private readonly IntentResolver $resolver,
         private readonly ActionExecutorInterface $executor,
         private readonly ConversationManagerInterface $conversationManager,
     ) {}
+
+    /**
+     * Set the authorizer for security checks
+     */
+    public function setAuthorizer(AuthorizerInterface $authorizer): self
+    {
+        $this->authorizer = $authorizer;
+        return $this;
+    }
+
+    /**
+     * Set security context directly (useful when context is pre-built)
+     */
+    public function setSecurityContext(SecurityContext $context): self
+    {
+        $this->securityContext = $context;
+        return $this;
+    }
+
+    /**
+     * Get current security context
+     */
+    public function getSecurityContext(): SecurityContext
+    {
+        if ($this->securityContext) {
+            return $this->securityContext;
+        }
+
+        if ($this->authorizer) {
+            $this->securityContext = $this->authorizer->buildContext();
+            return $this->securityContext;
+        }
+
+        // No authorizer = full access
+        return new SecurityContext(null, null, ['*'], ['*' => ['*']]);
+    }
 
     /**
      * Process a user message and return a structured response.
@@ -40,6 +81,9 @@ class Orchestrator
      */
     public function handle(string $conversationId, string $userMessage): OrchestratorResponse
     {
+        // Pass security context to resolver for permission-aware prompts
+        $this->resolver->setSecurityContext($this->getSecurityContext());
+
         $conversation = $this->conversationManager->get($conversationId);
 
         try {
@@ -161,9 +205,18 @@ class Orchestrator
         $conversation->addUserMessage($input);
         $conversation->addAssistantMessage(json_encode($intent->toArray()));
 
-        // Non-action intents (question, clarification, unknown)
+        // Non-action intents (question, clarification) are always allowed
         if (!$intent->isAction()) {
             return OrchestratorResponse::message($intent);
+        }
+
+        // Authorization check for action intents
+        $authResult = $this->checkAuthorization($intent);
+        if (!$authResult->allowed) {
+            return OrchestratorResponse::unauthorized(
+                $authResult->reason ?? 'Bu işlem için yetkiniz yok.',
+                $authResult->suggestion
+            );
         }
 
         // Write action → needs confirmation
@@ -197,6 +250,19 @@ class Orchestrator
         }
 
         return OrchestratorResponse::executed($intent, $result);
+    }
+
+    /**
+     * Check authorization for an intent
+     */
+    private function checkAuthorization(ResolvedIntent $intent): \Botovis\Core\DTO\AuthorizationResult
+    {
+        if (!$this->authorizer) {
+            return \Botovis\Core\DTO\AuthorizationResult::allow();
+        }
+
+        $context = $this->getSecurityContext();
+        return $this->authorizer->authorize($intent, $context);
     }
 
     private function buildResultSummary(ActionResult $result): string
