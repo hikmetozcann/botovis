@@ -6,8 +6,11 @@ namespace Botovis\Laravel;
 
 use Illuminate\Support\ServiceProvider;
 use Botovis\Core\Contracts\SchemaDiscoveryInterface;
+use Botovis\Core\Contracts\LlmDriverInterface;
 use Botovis\Laravel\Schema\EloquentSchemaDiscovery;
+use Botovis\Laravel\Llm\LlmDriverFactory;
 use Botovis\Laravel\Commands\DiscoverCommand;
+use Botovis\Laravel\Commands\ChatCommand;
 
 class BotovisServiceProvider extends ServiceProvider
 {
@@ -23,6 +26,12 @@ class BotovisServiceProvider extends ServiceProvider
                 config('botovis.models', [])
             );
         });
+
+        $this->app->singleton(LlmDriverInterface::class, function ($app) {
+            return LlmDriverFactory::make(
+                config('botovis.llm', [])
+            );
+        });
     }
 
     public function boot(): void
@@ -34,6 +43,7 @@ class BotovisServiceProvider extends ServiceProvider
 
             $this->commands([
                 DiscoverCommand::class,
+                ChatCommand::class,
             ]);
         }
     }
