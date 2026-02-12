@@ -1,0 +1,39 @@
+name: .NET Tests
+
+on:
+  push:
+    paths:
+      - 'packages/dotnet/**'
+  pull_request:
+    paths:
+      - 'packages/dotnet/**'
+
+defaults:
+  run:
+    working-directory: packages/dotnet
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dotnet: ['8.0.x']
+
+    name: .NET ${{ matrix.dotnet }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.dotnet }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore
+
+      - name: Test
+        run: dotnet test --no-build --verbosity normal

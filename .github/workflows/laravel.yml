@@ -1,0 +1,47 @@
+name: Laravel Tests
+
+on:
+  push:
+    paths:
+      - 'packages/laravel/**'
+  pull_request:
+    paths:
+      - 'packages/laravel/**'
+
+defaults:
+  run:
+    working-directory: packages/laravel
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.1', '8.2', '8.3']
+        laravel: ['10.*', '11.*', '12.*']
+        exclude:
+          - php: '8.1'
+            laravel: '12.*'
+
+    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, curl, libxml, mbstring, zip
+          coverage: xdebug
+
+      - name: Install dependencies
+        run: |
+          composer require "illuminate/support:${{ matrix.laravel }}" --no-update
+          composer install --prefer-dist --no-interaction
+
+      - name: Run tests
+        run: composer test
+
+      - name: Run static analysis
+        run: composer analyse

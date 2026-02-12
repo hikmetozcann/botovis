@@ -1,0 +1,26 @@
+/vendor/
+/node_modules/
+.env
+*.log
+
+# Laravel / PHP
+packages/laravel/vendor/
+packages/laravel/composer.lock
+
+# Node.js
+packages/node/node_modules/
+packages/node/dist/
+packages/node/package-lock.json
+
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# IDE
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
