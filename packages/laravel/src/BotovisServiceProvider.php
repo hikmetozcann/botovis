@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Botovis\Laravel;
 
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 use Botovis\Core\Contracts\SchemaDiscoveryInterface;
 use Botovis\Core\Contracts\LlmDriverInterface;
@@ -73,6 +74,26 @@ class BotovisServiceProvider extends ServiceProvider
         $this->publishes([
             __DIR__ . '/../config/botovis.php' => config_path('botovis.php'),
         ], 'botovis-config');
+
+        // ── Widget asset publishing ──
+        $widgetDist = realpath(__DIR__ . '/../../widget/dist');
+        if ($widgetDist) {
+            $this->publishes([
+                $widgetDist => public_path('vendor/botovis'),
+            ], 'botovis-assets');
+        }
+
+        // ── Views ──
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'botovis');
+        $this->publishes([
+            __DIR__ . '/../resources/views' => resource_path('views/vendor/botovis'),
+        ], 'botovis-views');
+
+        // ── Blade directive: @botovisWidget ──
+        Blade::directive('botovisWidget', function ($expression) {
+            $defaults = "['endpoint' => '/' . config('botovis.route.prefix', 'botovis'), 'lang' => 'tr', 'theme' => 'auto', 'position' => 'bottom-right']";
+            return "<?php echo view('botovis::widget', array_merge({$defaults}, {$expression} ?: []))->render(); ?>";
+        });
 
         // ── Artisan commands ──
         if ($this->app->runningInConsole()) {

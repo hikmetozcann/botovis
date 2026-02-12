@@ -1,0 +1,31 @@
+{
+  "name": "@botovis/widget",
+  "version": "0.1.0",
+  "description": "Botovis chat widget — Web Component for natural language CRUD",
+  "type": "module",
+  "main": "dist/botovis-widget.umd.cjs",
+  "module": "dist/botovis-widget.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/botovis-widget.js",
+      "require": "./dist/botovis-widget.umd.cjs"
+    },
+    "./react": "./wrappers/react.tsx",
+    "./vue": "./wrappers/vue.ts"
+  },
+  "files": [
+    "dist",
+    "wrappers"
+  ],
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^5.4.0"
+  },
+  "license": "MIT"
+}
