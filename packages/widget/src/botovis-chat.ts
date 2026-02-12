@@ -24,7 +24,7 @@ export class BotovisChat extends HTMLElement {
   // ── Observed attributes ────────────────────────
   static observedAttributes = [
     'endpoint', 'lang', 'theme', 'position',
-    'title', 'placeholder', 'csrf-token', 'sounds',
+    'title', 'placeholder', 'csrf-token', 'sounds', 'streaming',
   ];
 
   // ── State ──────────────────────────────────────
@@ -44,6 +44,10 @@ export class BotovisChat extends HTMLElement {
   private viewMode: ViewMode = 'chat';
   private conversations: ConversationSummary[] = [];
   private isLoadingHistory = false;
+
+  // Streaming state
+  private streamController: AbortController | null = null;
+  private currentStreamingMessageId: string | null = null;
 
   constructor() {
     super();
@@ -86,6 +90,7 @@ export class BotovisChat extends HTMLElement {
       placeholder: this.getAttribute('placeholder') || t('placeholder', this.locale),
       csrfToken: this.getAttribute('csrf-token') || this.detectCsrf(),
       sounds: this.getAttribute('sounds') !== 'false',
+      streaming: this.getAttribute('streaming') !== 'false',
     };
   }
 
@@ -123,12 +128,121 @@ export class BotovisChat extends HTMLElement {
     this.addUserMessage(text);
     this.setLoading(true);
 
+    // Use streaming if enabled
+    if (this.cfg.streaming) {
+      this.sendWithStreaming(text);
+      return;
+    }
+
     try {
       const response = await this.api.chat(text, this.conversationId ?? undefined);
       this.processResponse(response);
     } catch (err) {
       this.handleError(err);
     } finally {
+      this.setLoading(false);
+    }
+  }
+
+  private sendWithStreaming(text: string): void {
+    // Create a placeholder message for streaming
+    this.currentStreamingMessageId = this.uid();
+    this.addMessage({
+      id: this.currentStreamingMessageId,
+      role: 'assistant',
+      type: 'loading',
+      content: '',
+      timestamp: new Date(),
+    });
+
+    this.streamController = this.api.streamChat(
+      text,
+      this.conversationId ?? undefined,
+      {
+        onInit: (conversationId) => {
+          this.conversationId = conversationId;
+        },
+
+        onStep: (step) => {
+          // Emit event for step visibility
+          this.dispatchEvent(new CustomEvent('botovis:step', { detail: step }));
+          
+          // Update placeholder with thinking indicator
+          this.updateStreamingMessage(`🤔 ${step.thought}`);
+        },
+
+        onMessage: (content) => {
+          // Replace placeholder with final message
+          this.finalizeStreamingMessage(content, 'text');
+        },
+
+        onConfirmation: (action, params, description) => {
+          this.hasPending = true;
+          this.finalizeStreamingMessage(description, 'confirmation', {
+            type: 'operation',
+            action,
+            table: params.table as string || null,
+            data: params,
+            where: {},
+            select: [],
+            message: description,
+            confidence: 1,
+            auto_continue: false,
+          });
+        },
+
+        onError: (error) => {
+          this.finalizeStreamingMessage(error.message, 'error');
+        },
+
+        onDone: () => {
+          this.setLoading(false);
+          this.streamController = null;
+          if (!this.isOpen && this.cfg.sounds) this.playSound();
+        },
+
+        onAbort: () => {
+          this.setLoading(false);
+          this.streamController = null;
+        },
+      }
+    );
+  }
+
+  private updateStreamingMessage(content: string): void {
+    if (!this.currentStreamingMessageId) return;
+
+    const msgIndex = this.messages.findIndex(m => m.id === this.currentStreamingMessageId);
+    if (msgIndex !== -1) {
+      this.messages[msgIndex].content = content;
+      this.renderMessages();
+    }
+  }
+
+  private finalizeStreamingMessage(
+    content: string,
+    type: ChatMessage['type'],
+    intent?: ResolvedIntent,
+  ): void {
+    if (!this.currentStreamingMessageId) return;
+
+    const msgIndex = this.messages.findIndex(m => m.id === this.currentStreamingMessageId);
+    if (msgIndex !== -1) {
+      this.messages[msgIndex] = {
+        ...this.messages[msgIndex],
+        type,
+        content,
+        intent: intent || null,
+      };
+      this.renderMessages();
+    }
+    this.currentStreamingMessageId = null;
+  }
+
+  cancelStream(): void {
+    if (this.streamController) {
+      this.streamController.abort();
+      this.streamController = null;
       this.setLoading(false);
     }
   }

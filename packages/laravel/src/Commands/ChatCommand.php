@@ -7,6 +7,8 @@ namespace Botovis\Laravel\Commands;
 use Illuminate\Console\Command;
 use Botovis\Core\Orchestrator;
 use Botovis\Core\OrchestratorResponse;
+use Botovis\Core\Agent\AgentOrchestrator;
+use Botovis\Core\Agent\AgentResponse;
 use Botovis\Core\Contracts\LlmDriverInterface;
 use Botovis\Core\Contracts\SchemaDiscoveryInterface;
 use Botovis\Core\Contracts\ActionResult;
@@ -23,13 +25,15 @@ use Botovis\Core\Enums\IntentType;
  */
 class ChatCommand extends Command
 {
-    protected $signature = 'botovis:chat';
+    protected $signature = 'botovis:chat {--simple : Use simple mode instead of agent mode}';
     protected $description = 'Interactive chat to test Botovis (developer tool)';
 
     private bool $pendingConfirmation = false;
+    private string $mode = 'agent';
 
     public function handle(
         Orchestrator $orchestrator,
+        AgentOrchestrator $agentOrchestrator,
         SchemaDiscoveryInterface $discovery,
         LlmDriverInterface $llm,
     ): int {
@@ -40,10 +44,12 @@ class ChatCommand extends Command
             return self::FAILURE;
         }
 
+        $this->mode = $this->option('simple') ? 'simple' : config('botovis.mode', 'agent');
         $conversationId = 'cli_' . uniqid();
 
         $this->info('🤖 Botovis Chat (type "exit" to quit)');
         $this->line("   Driver: {$llm->name()}");
+        $this->line("   Mode: <fg=cyan>{$this->mode}</>");
         $this->line("   Models: " . implode(', ', $schema->getTableNames()));
         $this->line('');
 
@@ -63,10 +69,19 @@ class ChatCommand extends Command
 
             try {
                 $this->line('<fg=gray>Düşünüyorum...</>');
-                $response = $orchestrator->handle($conversationId, $input);
-                $this->renderResponse($response);
+                
+                if ($this->mode === 'agent') {
+                    $response = $agentOrchestrator->handle($conversationId, $input);
+                    $this->renderAgentResponse($response);
+                } else {
+                    $response = $orchestrator->handle($conversationId, $input);
+                    $this->renderResponse($response);
+                }
             } catch (\Throwable $e) {
                 $this->error("Hata: {$e->getMessage()}");
+                if ($this->output->isVerbose()) {
+                    $this->error($e->getTraceAsString());
+                }
             }
 
             $this->line('');
@@ -76,7 +91,81 @@ class ChatCommand extends Command
     }
 
     // ──────────────────────────────────────────────
-    //  Response Rendering
+    //  Agent Response Rendering
+    // ──────────────────────────────────────────────
+
+    private function renderAgentResponse(AgentResponse $response): void
+    {
+        // Show reasoning steps
+        if (!empty($response->steps)) {
+            $this->line('');
+            $this->line('<fg=yellow>📝 Reasoning Steps:</>');
+            foreach ($response->steps as $step) {
+                $this->line('');
+                $this->line("<fg=gray>Step {$step['step']}:</>");
+                if (!empty($step['thought'])) {
+                    $this->line("  💭 " . $step['thought']);
+                }
+                if (!empty($step['action'])) {
+                    $params = json_encode($step['action_params'] ?? [], JSON_UNESCAPED_UNICODE);
+                    $this->line("  🔧 <fg=cyan>{$step['action']}</> ({$params})");
+                }
+                if (!empty($step['observation'])) {
+                    $obs = mb_strlen($step['observation']) > 200 
+                        ? mb_substr($step['observation'], 0, 200) . '...' 
+                        : $step['observation'];
+                    $this->line("  👁 " . str_replace("\n", "\n     ", $obs));
+                }
+            }
+            $this->line('');
+        }
+
+        match ($response->type) {
+            'message' => $this->renderAgentMessage($response),
+            'confirmation' => $this->renderAgentConfirmation($response),
+            'executed' => $this->renderAgentExecuted($response),
+            'error' => $this->error("❌ {$response->message}"),
+            default => $this->line($response->message),
+        };
+    }
+
+    private function renderAgentMessage(AgentResponse $response): void
+    {
+        $this->line('');
+        $this->info("💬 Cevap:");
+        foreach (explode("\n", $response->message) as $line) {
+            $this->line("   {$line}");
+        }
+    }
+
+    private function renderAgentConfirmation(AgentResponse $response): void
+    {
+        $this->line('');
+        if ($response->pendingAction) {
+            $action = $response->pendingAction['action'] ?? 'unknown';
+            $params = json_encode($response->pendingAction['params'] ?? [], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            $this->line("<fg=cyan>Action:</> {$action}");
+            $this->line("<fg=cyan>Params:</>");
+            $this->line($params);
+        }
+        $this->line('');
+        $this->warn('⚠️  Bu işlemi onaylıyor musunuz? (evet/hayır)');
+    }
+
+    private function renderAgentExecuted(AgentResponse $response): void
+    {
+        $this->line('');
+        $this->info("✅ {$response->message}");
+        
+        if ($response->result) {
+            $this->line('');
+            $this->line('<fg=gray>Sonuç:</>');
+            $this->line(json_encode($response->result, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    //  Simple Mode Response Rendering
     // ──────────────────────────────────────────────
 
     private function renderResponse(OrchestratorResponse $response): void

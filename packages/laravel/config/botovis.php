@@ -4,6 +4,48 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Agent Mode
+    |--------------------------------------------------------------------------
+    |
+    | Botovis has two operating modes:
+    |
+    | 'simple' - Single-shot intent resolution (faster, less tokens)
+    | 'agent'  - ReAct pattern with tool use (smarter, more capable)
+    |
+    | Agent mode allows the AI to use tools, explore data, and reason
+    | through complex queries step by step. Recommended for production.
+    |
+    */
+    'mode' => env('BOTOVIS_MODE', 'agent'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Agent Configuration
+    |--------------------------------------------------------------------------
+    */
+    'agent' => [
+        /*
+        | Maximum reasoning steps before giving up.
+        | More steps = can handle more complex queries but uses more tokens.
+        */
+        'max_steps' => env('BOTOVIS_AGENT_MAX_STEPS', 10),
+
+        /*
+        | Show reasoning steps to user in response.
+        | Useful for debugging and transparency.
+        */
+        'show_steps' => env('BOTOVIS_AGENT_SHOW_STEPS', false),
+
+        /*
+        | Enable streaming (Server-Sent Events).
+        | When true, agent steps are sent in real-time.
+        | When false, waits until complete before responding.
+        */
+        'streaming' => env('BOTOVIS_AGENT_STREAMING', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Botovis Models (Whitelist)
     |--------------------------------------------------------------------------
     |

@@ -11,6 +11,7 @@ export interface BotovisConfig {
   placeholder: string;
   csrfToken: string | null;
   sounds: boolean;
+  streaming: boolean;
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -118,4 +119,55 @@ export interface ConversationListResponse {
 
 export interface ConversationResponse {
   conversation: ConversationDetail;
+}
+
+// ── Streaming Types ──────────────────────────────
+
+export type StreamingEventType =
+  | 'init'
+  | 'step'
+  | 'thinking'
+  | 'tool_call'
+  | 'tool_result'
+  | 'confirmation'
+  | 'message'
+  | 'error'
+  | 'done';
+
+export interface StreamingEvent {
+  type: StreamingEventType;
+  data: Record<string, unknown>;
+}
+
+export interface AgentStep {
+  step: number;
+  thought: string;
+  action: string | null;
+  action_params: Record<string, unknown> | null;
+  observation: string | null;
+}
+
+export interface StreamingHandlers {
+  /** Called for every event */
+  onEvent?: (event: StreamingEvent) => void;
+  /** Called when conversation ID is received */
+  onInit?: (conversationId: string) => void;
+  /** Called when a reasoning step completes */
+  onStep?: (step: AgentStep) => void;
+  /** Called when agent is thinking */
+  onThinking?: (step: number, thought: string) => void;
+  /** Called when agent calls a tool */
+  onToolCall?: (step: number, tool: string, params: Record<string, unknown>) => void;
+  /** Called when tool returns result */
+  onToolResult?: (step: number, tool: string, observation: string) => void;
+  /** Called when confirmation is needed */
+  onConfirmation?: (action: string, params: Record<string, unknown>, description: string) => void;
+  /** Called with final message */
+  onMessage?: (content: string) => void;
+  /** Called on error */
+  onError?: (error: Error) => void;
+  /** Called when stream completes */
+  onDone?: (steps: AgentStep[], message: string | null) => void;
+  /** Called when stream is aborted */
+  onAbort?: () => void;
 }

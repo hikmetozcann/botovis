@@ -7,10 +7,14 @@ namespace Botovis\Laravel\Http;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Botovis\Core\Orchestrator;
+use Botovis\Core\Agent\AgentOrchestrator;
+use Botovis\Core\Agent\StreamingEvent;
 use Botovis\Core\Contracts\SchemaDiscoveryInterface;
 use Botovis\Core\Contracts\ConversationRepositoryInterface;
 use Botovis\Core\DTO\Message;
+use Botovis\Core\Enums\ActionType;
 use Botovis\Laravel\Security\BotovisAuthorizer;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
@@ -29,13 +33,18 @@ use DateTimeImmutable;
  */
 class BotovisController extends Controller
 {
+    private string $mode;
+
     public function __construct(
         private readonly Orchestrator $orchestrator,
+        private readonly AgentOrchestrator $agentOrchestrator,
         private readonly BotovisAuthorizer $authorizer,
         private readonly ?ConversationRepositoryInterface $conversationRepository = null,
     ) {
-        // Inject authorizer into orchestrator
+        // Inject authorizer into both orchestrators
         $this->orchestrator->setAuthorizer($this->authorizer);
+        $this->agentOrchestrator->setAuthorizer($this->authorizer);
+        $this->mode = config('botovis.mode', 'agent');
     }
 
     /**
@@ -91,21 +100,36 @@ class BotovisController extends Controller
             ));
         }
 
-        // Process with orchestrator
-        $response = $this->orchestrator->handle($conversationId, $message);
+        // Process with appropriate orchestrator based on mode
+        if ($this->mode === 'agent') {
+            $response = $this->agentOrchestrator->handle($conversationId, $message);
+            $responseArray = $response->toArray();
+            
+            // Add reasoning steps if configured
+            if (!config('botovis.agent.show_steps', false)) {
+                unset($responseArray['steps']);
+            }
+        } else {
+            $response = $this->orchestrator->handle($conversationId, $message);
+            $responseArray = $response->toArray();
+        }
+
         $executionTimeMs = (int) ((microtime(true) - $startTime) * 1000);
 
         // Save assistant response
         if ($this->conversationRepository) {
+            $actionStr = $responseArray['pending_action']['action'] ?? null;
+            $actionType = $actionStr ? ActionType::tryFrom($actionStr) : null;
+            
             $this->conversationRepository->addMessage(Message::assistant(
                 Str::uuid()->toString(),
                 $conversationId,
-                $response->message,
-                intent: $response->type,
-                action: $response->intent?->action ?? null,
-                table: $response->intent?->table ?? null,
-                parameters: $response->intent?->data ?? [],
-                success: $response->type !== 'error',
+                $responseArray['message'] ?? '',
+                intent: $responseArray['type'] ?? null,
+                action: $actionType,
+                table: $responseArray['pending_action']['params']['table'] ?? null,
+                parameters: $responseArray['pending_action']['params'] ?? [],
+                success: ($responseArray['type'] ?? '') !== 'error',
                 executionTimeMs: $executionTimeMs,
             ));
 
@@ -119,7 +143,7 @@ class BotovisController extends Controller
 
         return response()->json([
             'conversation_id' => $conversationId,
-            ...$response->toArray(),
+            ...$responseArray,
         ]);
     }
 
@@ -138,11 +162,22 @@ class BotovisController extends Controller
         ]);
 
         $conversationId = $request->input('conversation_id');
-        $response = $this->orchestrator->confirm($conversationId);
+        
+        if ($this->mode === 'agent') {
+            $response = $this->agentOrchestrator->confirm($conversationId);
+            $responseArray = $response->toArray();
+            
+            if (!config('botovis.agent.show_steps', false)) {
+                unset($responseArray['steps']);
+            }
+        } else {
+            $response = $this->orchestrator->confirm($conversationId);
+            $responseArray = $response->toArray();
+        }
 
         return response()->json([
             'conversation_id' => $conversationId,
-            ...$response->toArray(),
+            ...$responseArray,
         ]);
     }
 
@@ -161,11 +196,18 @@ class BotovisController extends Controller
         ]);
 
         $conversationId = $request->input('conversation_id');
-        $response = $this->orchestrator->reject($conversationId);
+        
+        if ($this->mode === 'agent') {
+            $response = $this->agentOrchestrator->reject($conversationId);
+            $responseArray = $response->toArray();
+        } else {
+            $response = $this->orchestrator->reject($conversationId);
+            $responseArray = $response->toArray();
+        }
 
         return response()->json([
             'conversation_id' => $conversationId,
-            ...$response->toArray(),
+            ...$responseArray,
         ]);
     }
 
@@ -184,7 +226,12 @@ class BotovisController extends Controller
         ]);
 
         $conversationId = $request->input('conversation_id');
-        $this->orchestrator->reset($conversationId);
+        
+        if ($this->mode === 'agent') {
+            $this->agentOrchestrator->reset($conversationId);
+        } else {
+            $this->orchestrator->reset($conversationId);
+        }
 
         return response()->json([
             'conversation_id' => $conversationId,
@@ -242,7 +289,8 @@ class BotovisController extends Controller
 
         return response()->json([
             'status' => 'ok',
-            'version' => '0.1.0',
+            'version' => '0.2.0',
+            'mode' => $this->mode,
             'authenticated' => $context->isAuthenticated(),
             'user_role' => $context->userRole,
         ]);
@@ -290,5 +338,184 @@ class BotovisController extends Controller
         $user = Auth::guard($guard)->user();
 
         return $user?->getAuthIdentifier() ? (string) $user->getAuthIdentifier() : null;
+    }
+
+    /**
+     * POST /botovis/stream
+     *
+     * Server-Sent Events endpoint for streaming agent responses.
+     * Body: { "message": "string", "conversation_id": "string?" }
+     */
+    public function stream(Request $request): StreamedResponse
+    {
+        // Check authentication
+        $authError = $this->checkAuthForStream($request);
+        if ($authError) {
+            return $this->streamError($authError);
+        }
+
+        $request->validate([
+            'message' => 'required|string|max:2000',
+            'conversation_id' => 'nullable|string|uuid',
+        ]);
+
+        $message = $request->input('message');
+        $userId = $this->getUserId();
+
+        // Get or create conversation
+        $conversationId = $request->input('conversation_id');
+        $isNewConversation = false;
+
+        if ($conversationId && $this->conversationRepository) {
+            if (!$this->conversationRepository->belongsToUser($conversationId, $userId)) {
+                return $this->streamError('Sohbet bulunamadı.');
+            }
+        } elseif ($this->conversationRepository) {
+            $conversation = $this->conversationRepository->createConversation($userId, 'Yeni Sohbet');
+            $conversationId = $conversation->id;
+            $isNewConversation = true;
+        } else {
+            $conversationId = $this->generateConversationId($request);
+        }
+
+        // Save user message
+        if ($this->conversationRepository) {
+            $this->conversationRepository->addMessage(Message::user(
+                Str::uuid()->toString(),
+                $conversationId,
+                $message,
+            ));
+
+            if ($isNewConversation && strlen($message) > 0) {
+                $title = mb_substr($message, 0, 50);
+                if (mb_strlen($message) > 50) $title .= '...';
+                $this->conversationRepository->updateTitle($conversationId, $title);
+            }
+        }
+
+        return $this->createSseResponse(function () use ($conversationId, $message) {
+            // First emit conversation_id
+            $this->emitSse('init', ['conversation_id' => $conversationId]);
+
+            // Stream agent events
+            $startTime = microtime(true);
+            $finalMessage = null;
+
+            foreach ($this->agentOrchestrator->stream($conversationId, $message) as $event) {
+                $this->emitSse($event->type, $event->data);
+
+                if ($event->type === StreamingEvent::TYPE_MESSAGE) {
+                    $finalMessage = $event->data['content'] ?? '';
+                }
+            }
+
+            // Save assistant response after stream completes
+            if ($this->conversationRepository && $finalMessage !== null) {
+                $executionTimeMs = (int) ((microtime(true) - $startTime) * 1000);
+                $this->conversationRepository->addMessage(Message::assistant(
+                    Str::uuid()->toString(),
+                    $conversationId,
+                    $finalMessage,
+                    executionTimeMs: $executionTimeMs,
+                ));
+            }
+        });
+    }
+
+    /**
+     * POST /botovis/stream-confirm
+     *
+     * Server-Sent Events endpoint for streaming confirmation responses.
+     * Body: { "conversation_id": "string" }
+     */
+    public function streamConfirm(Request $request): StreamedResponse
+    {
+        $authError = $this->checkAuthForStream($request);
+        if ($authError) {
+            return $this->streamError($authError);
+        }
+
+        $request->validate([
+            'conversation_id' => 'required|string|uuid',
+        ]);
+
+        $conversationId = $request->input('conversation_id');
+        $userId = $this->getUserId();
+
+        if ($this->conversationRepository && !$this->conversationRepository->belongsToUser($conversationId, $userId)) {
+            return $this->streamError('Sohbet bulunamadı.');
+        }
+
+        return $this->createSseResponse(function () use ($conversationId) {
+            foreach ($this->agentOrchestrator->streamConfirm($conversationId) as $event) {
+                $this->emitSse($event->type, $event->data);
+            }
+        });
+    }
+
+    /**
+     * Create SSE response with proper headers.
+     */
+    private function createSseResponse(callable $callback): StreamedResponse
+    {
+        return new StreamedResponse(function () use ($callback) {
+            // Disable all output buffering for real-time streaming
+            while (ob_get_level() > 0) {
+                ob_end_flush();
+            }
+            ob_implicit_flush(true);
+            
+            // Run the callback
+            $callback();
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Connection' => 'keep-alive',
+            'X-Accel-Buffering' => 'no', // Disable nginx buffering
+        ]);
+    }
+
+    /**
+     * Emit a single SSE event.
+     */
+    private function emitSse(string $event, array $data): void
+    {
+        echo "event: {$event}\n";
+        echo "data: " . json_encode($data, JSON_UNESCAPED_UNICODE) . "\n\n";
+        
+        // Force flush
+        flush();
+    }
+
+    /**
+     * Return an error as SSE stream.
+     */
+    private function streamError(string $message): StreamedResponse
+    {
+        return $this->createSseResponse(function () use ($message) {
+            $this->emitSse('error', ['message' => $message]);
+            $this->emitSse('done', []);
+        });
+    }
+
+    /**
+     * Check auth for streaming endpoint (returns error message or null).
+     */
+    private function checkAuthForStream(Request $request): ?string
+    {
+        $requireAuth = config('botovis.security.require_auth', true);
+        
+        if (!$requireAuth) {
+            return null;
+        }
+
+        $guard = config('botovis.security.guard', 'web');
+        $user = Auth::guard($guard)->user();
+
+        if (!$user) {
+            return 'Bu özelliği kullanmak için giriş yapmalısınız.';
+        }
+
+        return null;
     }
 }

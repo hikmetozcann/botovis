@@ -24,6 +24,10 @@ Route::post('/reset', [BotovisController::class, 'reset']);
 Route::get('/schema', [BotovisController::class, 'schema']);
 Route::get('/status', [BotovisController::class, 'status']);
 
+// Streaming endpoints (SSE)
+Route::post('/stream', [BotovisController::class, 'stream']);
+Route::post('/stream-confirm', [BotovisController::class, 'streamConfirm']);
+
 // Conversation management
 Route::get('/conversations', [ConversationController::class, 'index']);
 Route::post('/conversations', [ConversationController::class, 'store']);

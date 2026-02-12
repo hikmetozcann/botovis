@@ -14,6 +14,8 @@ use Botovis\Core\Contracts\ConversationManagerInterface;
 use Botovis\Core\Contracts\ConversationRepositoryInterface;
 use Botovis\Core\Intent\IntentResolver;
 use Botovis\Core\Orchestrator;
+use Botovis\Core\Agent\AgentOrchestrator;
+use Botovis\Core\Tools\ToolRegistry;
 use Botovis\Laravel\Schema\EloquentSchemaDiscovery;
 use Botovis\Laravel\Llm\LlmDriverFactory;
 use Botovis\Laravel\Action\EloquentActionExecutor;
@@ -23,6 +25,14 @@ use Botovis\Laravel\Repositories\SessionConversationRepository;
 use Botovis\Laravel\Security\BotovisAuthorizer;
 use Botovis\Laravel\Commands\DiscoverCommand;
 use Botovis\Laravel\Commands\ChatCommand;
+use Botovis\Laravel\Tools\SearchRecordsTool;
+use Botovis\Laravel\Tools\CountRecordsTool;
+use Botovis\Laravel\Tools\GetSampleDataTool;
+use Botovis\Laravel\Tools\GetColumnStatsTool;
+use Botovis\Laravel\Tools\AggregateTool;
+use Botovis\Laravel\Tools\CreateRecordTool;
+use Botovis\Laravel\Tools\UpdateRecordTool;
+use Botovis\Laravel\Tools\DeleteRecordTool;
 
 class BotovisServiceProvider extends ServiceProvider
 {
@@ -92,6 +102,39 @@ class BotovisServiceProvider extends ServiceProvider
                 $app->make(ConversationManagerInterface::class),
             );
         });
+
+        // ── Tool Registry (for Agent mode) ──
+
+        $this->app->singleton(ToolRegistry::class, function ($app) {
+            $schema = $app->make(SchemaDiscoveryInterface::class)->discover();
+
+            $registry = new ToolRegistry();
+            $registry->registerMany([
+                new SearchRecordsTool($schema),
+                new CountRecordsTool($schema),
+                new GetSampleDataTool($schema),
+                new GetColumnStatsTool($schema),
+                new AggregateTool($schema),
+                new CreateRecordTool($schema),
+                new UpdateRecordTool($schema),
+                new DeleteRecordTool($schema),
+            ]);
+
+            return $registry;
+        });
+
+        // ── Agent Orchestrator (new ReAct-based system) ──
+
+        $this->app->singleton(AgentOrchestrator::class, function ($app) {
+            $schema = $app->make(SchemaDiscoveryInterface::class)->discover();
+
+            return new AgentOrchestrator(
+                $app->make(LlmDriverInterface::class),
+                $app->make(ToolRegistry::class),
+                $schema,
+                $app->make(ConversationManagerInterface::class),
+            );
+        });
     }
 
     public function boot(): void
@@ -127,7 +170,7 @@ class BotovisServiceProvider extends ServiceProvider
 
         // ── Blade directive: @botovisWidget ──
         Blade::directive('botovisWidget', function ($expression) {
-            $defaults = "['endpoint' => '/' . config('botovis.route.prefix', 'botovis'), 'lang' => 'tr', 'theme' => 'auto', 'position' => 'bottom-right']";
+            $defaults = "['endpoint' => '/' . config('botovis.route.prefix', 'botovis'), 'lang' => 'tr', 'theme' => 'auto', 'position' => 'bottom-right', 'streaming' => config('botovis.agent.streaming', true)]";
             $merged = empty($expression) ? $defaults : "array_merge({$defaults}, {$expression})";
             return "<?php echo view('botovis::widget', {$merged})->render(); ?>";
         });

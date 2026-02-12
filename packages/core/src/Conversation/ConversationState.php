@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Botovis\Core\Conversation;
 
+use Botovis\Core\Agent\AgentState;
 use Botovis\Core\Intent\ResolvedIntent;
 
 /**
@@ -18,6 +19,9 @@ class ConversationState
 
     /** The last intent that requires confirmation, waiting for user approval */
     private ?ResolvedIntent $pendingIntent = null;
+
+    /** The agent state when waiting for confirmation (new agent system) */
+    private ?AgentState $pendingAgentState = null;
 
     /**
      * Add a user message to history.
@@ -153,5 +157,41 @@ class ConversationState
             'hayır', 'iptal', 'vazgeç', 'istemiyorum', 'yapma',
             'no', 'cancel', 'abort', 'reject', 'stop',
         ];
+    }
+
+    // ──────────────────────────────────────────────
+    //  Agent State (new agent-based system)
+    // ──────────────────────────────────────────────
+
+    /**
+     * Set a pending agent state awaiting user confirmation.
+     */
+    public function setPendingAgentState(AgentState $state): void
+    {
+        $this->pendingAgentState = $state;
+    }
+
+    /**
+     * Get the pending agent state (if any).
+     */
+    public function getPendingAgentState(): ?AgentState
+    {
+        return $this->pendingAgentState;
+    }
+
+    /**
+     * Clear the pending agent state.
+     */
+    public function clearPendingAgentState(): void
+    {
+        $this->pendingAgentState = null;
+    }
+
+    /**
+     * Check if there's a pending agent state waiting for confirmation.
+     */
+    public function hasPendingAgentState(): bool
+    {
+        return $this->pendingAgentState !== null;
     }
 }
