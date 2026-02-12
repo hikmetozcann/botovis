@@ -113,41 +113,7 @@ class ChatCommand extends Command
 
             // ── Resolve intent via LLM ──
             try {
-                $this->line('<fg=gray>Düşünüyorum...</>');
-
-                $intent = $resolver->resolve($input, $conversation->getHistory());
-
-                $conversation->addUserMessage($input);
-                $conversation->addAssistantMessage(json_encode($intent->toArray()));
-
-                // Display intent info
-                $this->displayIntent($intent);
-
-                // ── Execute or ask for confirmation ──
-                if ($intent->isAction()) {
-                    if ($intent->requiresConfirmation()) {
-                        // Store as pending → wait for user confirmation
-                        $conversation->setPendingIntent($intent);
-                        $this->line('');
-                        $this->warn('⚠️  Bu işlemi onaylıyor musunuz? (evet/hayır)');
-                    } else {
-                        // READ → execute immediately
-                        $this->line('');
-                        $this->line('<fg=gray>Sorgu çalıştırılıyor...</>');
-                        $result = $executor->execute(
-                            $intent->table,
-                            $intent->action,
-                            $intent->data,
-                            $intent->where,
-                            $intent->select,
-                        );
-                        $this->displayResult($result);
-                        // Add result data to history so LLM knows what was returned
-                        $resultSummary = $this->buildResultSummary($result);
-                        $conversation->addAssistantMessage($resultSummary);
-                    }
-                }
-
+                $intent = $this->resolveAndExecute($input, $resolver, $executor, $conversation);
             } catch (\Throwable $e) {
                 $this->error("Hata: {$e->getMessage()}");
             }
@@ -156,6 +122,72 @@ class ChatCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Core resolve → execute loop with auto-continue support.
+     *
+     * When a READ has autoContinue=true, the result is fed back to the LLM
+     * and it automatically proceeds with the next step (max 3 auto-steps).
+     */
+    private function resolveAndExecute(
+        string $input,
+        IntentResolver $resolver,
+        ActionExecutorInterface $executor,
+        ConversationState $conversation,
+        int $depth = 0,
+    ): ?ResolvedIntent {
+        $maxAutoSteps = 3;
+
+        $this->line('<fg=gray>Düşünüyorum...</>');
+
+        $intent = $resolver->resolve($input, $conversation->getHistory());
+
+        $conversation->addUserMessage($input);
+        $conversation->addAssistantMessage(json_encode($intent->toArray()));
+
+        // Display intent info
+        $this->displayIntent($intent);
+
+        // ── Execute or ask for confirmation ──
+        if ($intent->isAction()) {
+            if ($intent->requiresConfirmation()) {
+                // Store as pending → wait for user confirmation
+                $conversation->setPendingIntent($intent);
+                $this->line('');
+                $this->warn('⚠️  Bu işlemi onaylıyor musunuz? (evet/hayır)');
+            } else {
+                // READ → execute immediately
+                $this->line('');
+                $this->line('<fg=gray>Sorgu çalıştırılıyor...</>');
+                $result = $executor->execute(
+                    $intent->table,
+                    $intent->action,
+                    $intent->data,
+                    $intent->where,
+                    $intent->select,
+                );
+                $this->displayResult($result);
+
+                $resultSummary = $this->buildResultSummary($result);
+                $conversation->addAssistantMessage($resultSummary);
+
+                // ── Auto-continue: if this READ was a prerequisite, proceed ──
+                if ($intent->autoContinue && $result->success && $depth < $maxAutoSteps) {
+                    $this->line('');
+                    $this->line('<fg=gray>Sonraki adıma geçiyorum...</>');
+                    return $this->resolveAndExecute(
+                        'Sonuçları gördüm, şimdi kullanıcının istediği bir sonraki işleme devam et.',
+                        $resolver,
+                        $executor,
+                        $conversation,
+                        $depth + 1,
+                    );
+                }
+            }
+        }
+
+        return $intent;
     }
 
     // ──────────────────────────────────────────────

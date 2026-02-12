@@ -28,14 +28,15 @@ use Botovis\Core\Enums\IntentType;
 final class ResolvedIntent
 {
     /**
-     * @param IntentType      $type       Intent category
-     * @param ActionType|null $action     CRUD action type
-     * @param string|null     $table      Target table name
-     * @param array           $data       Data payload (columns => values) for CREATE/UPDATE
-     * @param array           $where      Filter conditions for READ/UPDATE/DELETE
-     * @param string[]        $select     Columns to return for READ (empty = all)
-     * @param string          $message    Human-readable message
-     * @param float           $confidence Confidence score 0.0-1.0
+     * @param IntentType      $type           Intent category
+     * @param ActionType|null $action         CRUD action type
+     * @param string|null     $table          Target table name
+     * @param array           $data           Data payload (columns => values) for CREATE/UPDATE
+     * @param array           $where          Filter conditions for READ/UPDATE/DELETE
+     * @param string[]        $select         Columns to return for READ (empty = all)
+     * @param string          $message        Human-readable message
+     * @param float           $confidence     Confidence score 0.0-1.0
+     * @param bool            $autoContinue   If true, system auto-continues to next step after this READ
      */
     public function __construct(
         public readonly IntentType $type,
@@ -46,6 +47,7 @@ final class ResolvedIntent
         public readonly array $select = [],
         public readonly string $message = '',
         public readonly float $confidence = 0.0,
+        public readonly bool $autoContinue = false,
     ) {}
 
     /**
@@ -110,7 +112,7 @@ final class ResolvedIntent
 
     public function toArray(): array
     {
-        return array_filter([
+        $arr = array_filter([
             'type' => $this->type->value,
             'action' => $this->action?->value,
             'table' => $this->table,
@@ -120,6 +122,12 @@ final class ResolvedIntent
             'message' => $this->message ?: null,
             'confidence' => $this->confidence,
         ], fn ($v) => $v !== null);
+
+        if ($this->autoContinue) {
+            $arr['auto_continue'] = true;
+        }
+
+        return $arr;
     }
 
     /**

@@ -59,6 +59,13 @@ RULES:
 5. For UPDATE and DELETE, you MUST include "where" conditions to identify the record(s).
 6. If user's request is ambiguous or missing required information, ask for clarification.
 7. Use the "fillable" columns only for CREATE/UPDATE data — never write to non-fillable columns.
+8. AUTONOMOUS MULTI-STEP: If the user's request requires looking up data first before performing an action
+   (e.g. "find the manager position and assign it to Yusuf"), you MUST set "auto_continue": true on the
+   READ step. The system will execute the READ, feed the results back to you, and you should immediately
+   proceed with the next action using the data you found. Do NOT ask the user to confirm READ prerequisites
+   or say "shall I check?". Just do it.
+   Example: "Yusuf'u müdür yap" → First READ positions where name=Müdür with auto_continue:true,
+   then when you see the result, respond with UPDATE employees set position_id to the found ID.
 
 {$schemaContext}
 
@@ -73,12 +80,15 @@ For CRUD actions:
   "data": {"column": "value"},
   "where": {"column": "value"},
   "select": ["column1", "column2"],
+  "auto_continue": false,
   "message": "Human readable description of what you'll do",
   "confidence": 0.95
 }
 ```
 
 NOTE on "select": For READ actions, if the user asks for specific columns (e.g. "sadece isimlerini göster", "only names and phones"), put those column names in "select" array. If user wants all columns, omit "select" or set it to []. The "data" field is ONLY for CREATE/UPDATE payloads — never put column names in "data" for READ actions.
+
+NOTE on "auto_continue": Set to true ONLY on READ actions that are prerequisite lookups for a follow-up action the user already requested. When auto_continue is true, the system will execute the READ and immediately ask you for the next step. Do NOT set auto_continue on standalone READs (user just wants to see data) or on write actions.
 
 For questions/help:
 ```json
@@ -154,6 +164,7 @@ PROMPT;
             select: $parsed['select'] ?? [],
             message: $parsed['message'] ?? '',
             confidence: (float) ($parsed['confidence'] ?? 0.0),
+            autoContinue: (bool) ($parsed['auto_continue'] ?? false),
         );
     }
 }
