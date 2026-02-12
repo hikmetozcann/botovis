@@ -160,7 +160,7 @@ export class BotovisChat extends HTMLElement {
     return `
       <div class="bv-panel" id="panel">
         <div class="bv-header">
-          <span class="bv-header-title">${this.esc(this.cfg.title)}</span>
+          <span class="bv-header-title" id="header-title">${icons.logo}</span>
           <button class="bv-header-btn" id="btn-history" title="${this.i('conversations')}">${icons.clock}</button>
           <button class="bv-header-btn" id="btn-new" title="${this.i('newConversation')}">${icons.plus}</button>
           <button class="bv-header-btn" id="btn-reset" title="${this.i('reset')}">${icons.refresh}</button>
@@ -879,9 +879,9 @@ export class BotovisChat extends HTMLElement {
     if (inputArea) inputArea.style.display = 'none';
     if (inputHint) inputHint.style.display = 'none';
     
-    // Update header title
-    const title = this.shadow.querySelector('.bv-header-title');
-    if (title) title.textContent = this.i('conversations');
+    // Update header title to text
+    const title = this.$('header-title');
+    if (title) title.innerHTML = this.i('conversations');
     
     // Update history button to back
     const historyBtn = this.$('btn-history');
@@ -902,9 +902,9 @@ export class BotovisChat extends HTMLElement {
     if (inputArea) inputArea.style.display = 'flex';
     if (inputHint) inputHint.style.display = 'flex';
     
-    // Update header title
-    const title = this.shadow.querySelector('.bv-header-title');
-    if (title) title.textContent = this.cfg.title;
+    // Update header title to logo
+    const title = this.$('header-title');
+    if (title) title.innerHTML = icons.logo;
     
     // Update back button to history
     const historyBtn = this.$('btn-history');

@@ -229,6 +229,13 @@ export const styles = /*css*/`
   font-weight: 600;
   color: var(--bv-text);
   letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+}
+
+.bv-header-title svg {
+  height: 22px;
+  width: auto;
 }
 
 .bv-header-btn {
