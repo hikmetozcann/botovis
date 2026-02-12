@@ -5,38 +5,33 @@ declare(strict_types=1);
 namespace Botovis\Laravel\Commands;
 
 use Illuminate\Console\Command;
+use Botovis\Core\Orchestrator;
+use Botovis\Core\OrchestratorResponse;
 use Botovis\Core\Contracts\LlmDriverInterface;
 use Botovis\Core\Contracts\SchemaDiscoveryInterface;
-use Botovis\Core\Contracts\ActionExecutorInterface;
 use Botovis\Core\Contracts\ActionResult;
-use Botovis\Core\Intent\IntentResolver;
 use Botovis\Core\Intent\ResolvedIntent;
-use Botovis\Core\Conversation\ConversationState;
 use Botovis\Core\Enums\IntentType;
-use Botovis\Core\Enums\ActionType;
 
 /**
  * Interactive terminal chat for testing Botovis — full flow.
  *
  * Usage: php artisan botovis:chat
  *
- * Flow:
- *   1. User types a message
- *   2. LLM resolves intent (CREATE/READ/UPDATE/DELETE/QUESTION)
- *   3. READ → execute immediately
- *   4. CREATE/UPDATE/DELETE → ask for confirmation
- *   5. User says "evet/onaylıyorum" → execute
- *   6. User says "hayır/iptal" → cancel
+ * This is a developer testing tool. It uses the same Orchestrator
+ * that powers the HTTP API, but renders output in the terminal.
  */
 class ChatCommand extends Command
 {
     protected $signature = 'botovis:chat';
     protected $description = 'Interactive chat to test Botovis (developer tool)';
 
+    private bool $pendingConfirmation = false;
+
     public function handle(
+        Orchestrator $orchestrator,
         SchemaDiscoveryInterface $discovery,
         LlmDriverInterface $llm,
-        ActionExecutorInterface $executor,
     ): int {
         $schema = $discovery->discover();
 
@@ -45,8 +40,7 @@ class ChatCommand extends Command
             return self::FAILURE;
         }
 
-        $resolver = new IntentResolver($llm, $schema);
-        $conversation = new ConversationState();
+        $conversationId = 'cli_' . uniqid();
 
         $this->info('🤖 Botovis Chat (type "exit" to quit)');
         $this->line("   Driver: {$llm->name()}");
@@ -67,53 +61,10 @@ class ChatCommand extends Command
 
             $this->line('');
 
-            // ── Check if user is responding to a pending confirmation ──
-            if ($conversation->hasPendingIntent()) {
-                $pending = $conversation->getPendingIntent();
-
-                if (ConversationState::isConfirmation($input)) {
-                    $this->line('<fg=gray>İşlem yürütülüyor...</>');
-                    $result = $executor->execute(
-                        $pending->table,
-                        $pending->action,
-                        $pending->data,
-                        $pending->where,
-                        $pending->select,
-                    );
-                    $conversation->clearPendingIntent();
-                    $this->displayWriteResult($result, $pending);
-                    $conversation->addUserMessage($input);
-                    $conversation->addAssistantMessage($this->buildResultSummary($result));
-                    $this->line('');
-                    continue;
-                }
-
-                if (ConversationState::isRejection($input)) {
-                    $conversation->clearPendingIntent();
-                    $this->info('❌ İşlem iptal edildi.');
-                    $conversation->addUserMessage($input);
-                    $conversation->addAssistantMessage('İşlem iptal edildi.');
-
-                    // Check if user added a message after rejection ("hayır ama ...")
-                    $remainder = ConversationState::extractAfterRejection($input);
-                    if ($remainder !== null) {
-                        $this->line('');
-                        $this->line('<fg=gray>Mesajınızı değerlendiriyorum...</>');
-                        $input = $remainder;
-                        // Fall through to intent resolution below
-                    } else {
-                        $this->line('');
-                        continue;
-                    }
-                }
-
-                // Not a confirmation/rejection → treat as a new message, clear pending
-                $conversation->clearPendingIntent();
-            }
-
-            // ── Resolve intent via LLM ──
             try {
-                $intent = $this->resolveAndExecute($input, $resolver, $executor, $conversation);
+                $this->line('<fg=gray>Düşünüyorum...</>');
+                $response = $orchestrator->handle($conversationId, $input);
+                $this->renderResponse($response);
             } catch (\Throwable $e) {
                 $this->error("Hata: {$e->getMessage()}");
             }
@@ -124,70 +75,77 @@ class ChatCommand extends Command
         return self::SUCCESS;
     }
 
-    /**
-     * Core resolve → execute loop with auto-continue support.
-     *
-     * When a READ has autoContinue=true, the result is fed back to the LLM
-     * and it automatically proceeds with the next step (max 3 auto-steps).
-     */
-    private function resolveAndExecute(
-        string $input,
-        IntentResolver $resolver,
-        ActionExecutorInterface $executor,
-        ConversationState $conversation,
-        int $depth = 0,
-    ): ?ResolvedIntent {
-        $maxAutoSteps = 3;
+    // ──────────────────────────────────────────────
+    //  Response Rendering
+    // ──────────────────────────────────────────────
 
-        $this->line('<fg=gray>Düşünüyorum...</>');
-
-        $intent = $resolver->resolve($input, $conversation->getHistory());
-
-        $conversation->addUserMessage($input);
-        $conversation->addAssistantMessage(json_encode($intent->toArray()));
-
-        // Display intent info
-        $this->displayIntent($intent);
-
-        // ── Execute or ask for confirmation ──
-        if ($intent->isAction()) {
-            if ($intent->requiresConfirmation()) {
-                // Store as pending → wait for user confirmation
-                $conversation->setPendingIntent($intent);
-                $this->line('');
-                $this->warn('⚠️  Bu işlemi onaylıyor musunuz? (evet/hayır)');
-            } else {
-                // READ → execute immediately
-                $this->line('');
-                $this->line('<fg=gray>Sorgu çalıştırılıyor...</>');
-                $result = $executor->execute(
-                    $intent->table,
-                    $intent->action,
-                    $intent->data,
-                    $intent->where,
-                    $intent->select,
-                );
-                $this->displayResult($result);
-
-                $resultSummary = $this->buildResultSummary($result);
-                $conversation->addAssistantMessage($resultSummary);
-
-                // ── Auto-continue: if this READ was a prerequisite, proceed ──
-                if ($intent->autoContinue && $result->success && $depth < $maxAutoSteps) {
-                    $this->line('');
-                    $this->line('<fg=gray>Sonraki adıma geçiyorum...</>');
-                    return $this->resolveAndExecute(
-                        'Sonuçları gördüm, şimdi kullanıcının istediği bir sonraki işleme devam et.',
-                        $resolver,
-                        $executor,
-                        $conversation,
-                        $depth + 1,
-                    );
-                }
-            }
+    private function renderResponse(OrchestratorResponse $response): void
+    {
+        // Show intermediate auto-continue steps
+        foreach ($response->steps as $step) {
+            $this->displayIntent($step['intent']);
+            $this->line('');
+            $this->line('<fg=gray>Sorgu çalıştırılıyor...</>');
+            $this->displayReadResult($step['result']);
+            $this->line('');
+            $this->line('<fg=gray>Sonraki adıma geçiyorum...</>');
         }
 
-        return $intent;
+        match ($response->type) {
+            'message' => $this->renderMessage($response),
+            'confirmation' => $this->renderConfirmation($response),
+            'executed' => $this->renderExecuted($response),
+            'rejected' => $this->renderRejected(),
+            'error' => $this->error("❌ {$response->message}"),
+            default => $this->line($response->message),
+        };
+    }
+
+    private function renderMessage(OrchestratorResponse $response): void
+    {
+        if ($response->intent !== null) {
+            $this->displayIntent($response->intent);
+        } else {
+            $this->line('');
+            $this->info("💬 Cevap:");
+            $this->line("   {$response->message}");
+        }
+    }
+
+    private function renderConfirmation(OrchestratorResponse $response): void
+    {
+        if ($response->intent !== null) {
+            $this->displayIntent($response->intent);
+        }
+        $this->line('');
+        $this->warn('⚠️  Bu işlemi onaylıyor musunuz? (evet/hayır)');
+    }
+
+    private function renderExecuted(OrchestratorResponse $response): void
+    {
+        if ($response->intent !== null) {
+            $this->displayIntent($response->intent);
+        }
+
+        if ($response->result === null) {
+            return;
+        }
+
+        $this->line('');
+
+        // For write operations, show compact result
+        if ($response->intent?->requiresConfirmation()) {
+            $this->line('<fg=gray>İşlem yürütülüyor...</>');
+            $this->displayWriteResult($response->result, $response->intent);
+        } else {
+            $this->line('<fg=gray>Sorgu çalıştırılıyor...</>');
+            $this->displayReadResult($response->result);
+        }
+    }
+
+    private function renderRejected(): void
+    {
+        $this->info('❌ İşlem iptal edildi.');
     }
 
     // ──────────────────────────────────────────────
@@ -198,9 +156,9 @@ class ChatCommand extends Command
     {
         match ($intent->type) {
             IntentType::ACTION => $this->displayAction($intent),
-            IntentType::QUESTION => $this->displayQuestion($intent),
-            IntentType::CLARIFICATION => $this->displayClarification($intent),
-            IntentType::UNKNOWN => $this->displayUnknown($intent),
+            IntentType::QUESTION => $this->displayTextResponse('💬 Cevap:', $intent->message),
+            IntentType::CLARIFICATION => $this->displayTextResponse('❓ Bilgi Gerekli:', $intent->message, 'warn'),
+            IntentType::UNKNOWN => $this->displayTextResponse('❌ Anlaşılamadı:', $intent->message, 'error'),
         };
     }
 
@@ -238,34 +196,16 @@ class ChatCommand extends Command
         }
     }
 
-    private function displayQuestion(ResolvedIntent $intent): void
+    private function displayTextResponse(string $label, string $message, string $style = 'info'): void
     {
         $this->line('');
-        $this->info("💬 Cevap:");
-        $this->line("   {$intent->message}");
+        $this->{$style}($label);
+        $this->line("   {$message}");
     }
 
-    private function displayClarification(ResolvedIntent $intent): void
+    private function displayReadResult(ActionResult $result): void
     {
         $this->line('');
-        $this->warn("❓ Bilgi Gerekli:");
-        $this->line("   {$intent->message}");
-    }
-
-    private function displayUnknown(ResolvedIntent $intent): void
-    {
-        $this->line('');
-        $this->error("❌ Anlaşılamadı:");
-        $this->line("   {$intent->message}");
-    }
-
-    /**
-     * Display READ result — full table view.
-     */
-    private function displayResult(ActionResult $result): void
-    {
-        $this->line('');
-
         if ($result->success) {
             $this->info("✅ {$result->message}");
             $this->renderDataTable($result->data);
@@ -274,10 +214,6 @@ class ChatCommand extends Command
         }
     }
 
-    /**
-     * Display write (CREATE/UPDATE/DELETE) result — compact summary.
-     * Shows only the fields that changed + key identifiers.
-     */
     private function displayWriteResult(ActionResult $result, ResolvedIntent $intent): void
     {
         $this->line('');
@@ -293,21 +229,16 @@ class ChatCommand extends Command
             return;
         }
 
-        // Build a compact set of columns to show
         $importantKeys = array_unique(array_merge(
             ['id'],
-            array_keys($intent->data),     // changed fields
-            array_keys($intent->where),    // identifier fields
+            array_keys($intent->data),
+            array_keys($intent->where),
         ));
 
         $data = $result->data;
 
-        // Handle both single-record and multi-record results
         if (isset($data[0]) && is_array($data[0])) {
-            // Filter each record to important keys only
-            $filtered = array_map(function ($row) use ($importantKeys) {
-                return array_intersect_key($row, array_flip($importantKeys));
-            }, $data);
+            $filtered = array_map(fn ($row) => array_intersect_key($row, array_flip($importantKeys)), $data);
             $this->renderDataTable($filtered);
         } else {
             $filtered = array_intersect_key($data, array_flip($importantKeys));
@@ -318,22 +249,17 @@ class ChatCommand extends Command
         }
     }
 
-    /**
-     * Render an array of records as a table.
-     */
     private function renderDataTable(array $data): void
     {
         if (empty($data)) {
             return;
         }
 
-        // Limit display to first 10 records
         if (count($data) > 10) {
             $data = array_slice($data, 0, 10);
             $this->line("<fg=gray>   (ilk 10 kayıt gösteriliyor)</>");
         }
 
-        // For flat arrays (list of records), render as table
         if (isset($data[0]) && is_array($data[0])) {
             $headers = array_keys($data[0]);
 
@@ -347,35 +273,10 @@ class ChatCommand extends Command
 
             $this->table($headers, $rows);
         } else {
-            // Single record — key: value format
             foreach ($data as $key => $value) {
                 if (is_array($value)) $value = json_encode($value, JSON_UNESCAPED_UNICODE);
                 $this->line("   <fg=green>{$key}</>: {$value}");
             }
         }
-    }
-
-    /**
-     * Build a concise text summary of execution result for LLM history.
-     * Includes actual data so the LLM can reference it in future turns.
-     */
-    private function buildResultSummary(ActionResult $result): string
-    {
-        $summary = $result->success ? "[İşlem başarılı] " : "[İşlem başarısız] ";
-        $summary .= $result->message;
-
-        if (!empty($result->data)) {
-            // Add data in a compact JSON for the LLM to reference
-            $compactData = $result->data;
-            // Limit to first 5 records to keep context window reasonable
-            if (count($compactData) > 5) {
-                $compactData = array_slice($compactData, 0, 5);
-                $summary .= "\nSonuç (ilk 5): " . json_encode($compactData, JSON_UNESCAPED_UNICODE);
-            } else {
-                $summary .= "\nSonuç: " . json_encode($compactData, JSON_UNESCAPED_UNICODE);
-            }
-        }
-
-        return $summary;
     }
 }
