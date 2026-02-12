@@ -81,9 +81,9 @@ class ChatCommand extends Command
                         $pending->select,
                     );
                     $conversation->clearPendingIntent();
-                    $this->displayResult($result);
+                    $this->displayWriteResult($result, $pending);
                     $conversation->addUserMessage($input);
-                    $conversation->addAssistantMessage($result->message);
+                    $conversation->addAssistantMessage($this->buildResultSummary($result));
                     $this->line('');
                     continue;
                 }
@@ -93,8 +93,18 @@ class ChatCommand extends Command
                     $this->info('❌ İşlem iptal edildi.');
                     $conversation->addUserMessage($input);
                     $conversation->addAssistantMessage('İşlem iptal edildi.');
-                    $this->line('');
-                    continue;
+
+                    // Check if user added a message after rejection ("hayır ama ...")
+                    $remainder = ConversationState::extractAfterRejection($input);
+                    if ($remainder !== null) {
+                        $this->line('');
+                        $this->line('<fg=gray>Mesajınızı değerlendiriyorum...</>');
+                        $input = $remainder;
+                        // Fall through to intent resolution below
+                    } else {
+                        $this->line('');
+                        continue;
+                    }
                 }
 
                 // Not a confirmation/rejection → treat as a new message, clear pending
@@ -132,7 +142,9 @@ class ChatCommand extends Command
                             $intent->select,
                         );
                         $this->displayResult($result);
-                        $conversation->addAssistantMessage($result->message);
+                        // Add result data to history so LLM knows what was returned
+                        $resultSummary = $this->buildResultSummary($result);
+                        $conversation->addAssistantMessage($resultSummary);
                     }
                 }
 
@@ -215,49 +227,123 @@ class ChatCommand extends Command
         $this->line("   {$intent->message}");
     }
 
+    /**
+     * Display READ result — full table view.
+     */
     private function displayResult(ActionResult $result): void
     {
         $this->line('');
 
         if ($result->success) {
             $this->info("✅ {$result->message}");
-
-            if (!empty($result->data)) {
-                // Show results in a table for READ operations
-                $data = $result->data;
-
-                // Limit display to first 10 records
-                if (count($data) > 10) {
-                    $data = array_slice($data, 0, 10);
-                    $this->line("<fg=gray>   (ilk 10 kayıt gösteriliyor)</>");
-                }
-
-                // For flat arrays (list of records), render as table
-                if (isset($data[0]) && is_array($data[0])) {
-                    $headers = array_keys($data[0]);
-
-                    // Truncate long values for display
-                    $rows = array_map(function ($row) {
-                        return array_map(function ($val) {
-                            if (is_array($val)) return json_encode($val);
-                            $str = (string) $val;
-                            return mb_strlen($str) > 40 ? mb_substr($str, 0, 40) . '...' : $str;
-                        }, $row);
-                    }, $data);
-
-                    $this->table($headers, $rows);
-                } else {
-                    // Single record — key: value format
-                    foreach ($data as $key => $value) {
-                        if (is_array($value)) {
-                            $value = json_encode($value);
-                        }
-                        $this->line("   <fg=green>{$key}</>: {$value}");
-                    }
-                }
-            }
+            $this->renderDataTable($result->data);
         } else {
             $this->error("❌ {$result->message}");
         }
+    }
+
+    /**
+     * Display write (CREATE/UPDATE/DELETE) result — compact summary.
+     * Shows only the fields that changed + key identifiers.
+     */
+    private function displayWriteResult(ActionResult $result, ResolvedIntent $intent): void
+    {
+        $this->line('');
+
+        if (!$result->success) {
+            $this->error("❌ {$result->message}");
+            return;
+        }
+
+        $this->info("✅ {$result->message}");
+
+        if (empty($result->data)) {
+            return;
+        }
+
+        // Build a compact set of columns to show
+        $importantKeys = array_unique(array_merge(
+            ['id'],
+            array_keys($intent->data),     // changed fields
+            array_keys($intent->where),    // identifier fields
+        ));
+
+        $data = $result->data;
+
+        // Handle both single-record and multi-record results
+        if (isset($data[0]) && is_array($data[0])) {
+            // Filter each record to important keys only
+            $filtered = array_map(function ($row) use ($importantKeys) {
+                return array_intersect_key($row, array_flip($importantKeys));
+            }, $data);
+            $this->renderDataTable($filtered);
+        } else {
+            $filtered = array_intersect_key($data, array_flip($importantKeys));
+            foreach ($filtered as $key => $value) {
+                if (is_array($value)) $value = json_encode($value, JSON_UNESCAPED_UNICODE);
+                $this->line("   <fg=green>{$key}</>: {$value}");
+            }
+        }
+    }
+
+    /**
+     * Render an array of records as a table.
+     */
+    private function renderDataTable(array $data): void
+    {
+        if (empty($data)) {
+            return;
+        }
+
+        // Limit display to first 10 records
+        if (count($data) > 10) {
+            $data = array_slice($data, 0, 10);
+            $this->line("<fg=gray>   (ilk 10 kayıt gösteriliyor)</>");
+        }
+
+        // For flat arrays (list of records), render as table
+        if (isset($data[0]) && is_array($data[0])) {
+            $headers = array_keys($data[0]);
+
+            $rows = array_map(function ($row) {
+                return array_map(function ($val) {
+                    if (is_array($val)) return json_encode($val, JSON_UNESCAPED_UNICODE);
+                    $str = (string) $val;
+                    return mb_strlen($str) > 40 ? mb_substr($str, 0, 40) . '...' : $str;
+                }, $row);
+            }, $data);
+
+            $this->table($headers, $rows);
+        } else {
+            // Single record — key: value format
+            foreach ($data as $key => $value) {
+                if (is_array($value)) $value = json_encode($value, JSON_UNESCAPED_UNICODE);
+                $this->line("   <fg=green>{$key}</>: {$value}");
+            }
+        }
+    }
+
+    /**
+     * Build a concise text summary of execution result for LLM history.
+     * Includes actual data so the LLM can reference it in future turns.
+     */
+    private function buildResultSummary(ActionResult $result): string
+    {
+        $summary = $result->success ? "[İşlem başarılı] " : "[İşlem başarısız] ";
+        $summary .= $result->message;
+
+        if (!empty($result->data)) {
+            // Add data in a compact JSON for the LLM to reference
+            $compactData = $result->data;
+            // Limit to first 5 records to keep context window reasonable
+            if (count($compactData) > 5) {
+                $compactData = array_slice($compactData, 0, 5);
+                $summary .= "\nSonuç (ilk 5): " . json_encode($compactData, JSON_UNESCAPED_UNICODE);
+            } else {
+                $summary .= "\nSonuç: " . json_encode($compactData, JSON_UNESCAPED_UNICODE);
+            }
+        }
+
+        return $summary;
     }
 }

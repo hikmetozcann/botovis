@@ -99,23 +99,59 @@ class ConversationState
     }
 
     /**
-     * Check if the user message is a rejection.
+     * Check if the user message is a rejection (possibly with trailing text).
+     *
+     * Matches: "hayır", "hayır ama ...", "iptal", "no way" etc.
      */
     public static function isRejection(string $message): bool
     {
         $message = mb_strtolower(trim($message));
 
-        $rejectWords = [
-            'hayır', 'iptal', 'vazgeç', 'istemiyorum', 'yapma',
-            'no', 'cancel', 'abort', 'reject', 'stop',
-        ];
-
-        foreach ($rejectWords as $word) {
-            if ($message === $word || str_starts_with($message, $word)) {
+        foreach (self::rejectionWords() as $word) {
+            // Exact match or word followed by space/punctuation ("hayır ama ...")
+            if ($message === $word || preg_match('/^' . preg_quote($word, '/') . '[\s,\.!]+/u', $message)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Check if the rejection message has additional content after the rejection word.
+     * Returns the remainder text, or null if it's a pure rejection.
+     *
+     * "hayır" → null
+     * "hayır yusufun numarası ..." → "yusufun numarası ..."
+     */
+    public static function extractAfterRejection(string $message): ?string
+    {
+        $lower = mb_strtolower(trim($message));
+
+        foreach (self::rejectionWords() as $word) {
+            if (preg_match('/^' . preg_quote($word, '/') . '[\s,\.!]+(.+)$/su', $lower, $m)) {
+                $remainder = trim($m[1]);
+                // Return original casing: skip the rejection word + separator
+                $original = trim($message);
+                $offset = mb_strlen($word);
+                $rest = trim(mb_substr($original, $offset));
+                // Strip leading punctuation/spaces
+                $rest = ltrim($rest, ' ,.');
+                return $rest !== '' ? $rest : null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return string[]
+     */
+    private static function rejectionWords(): array
+    {
+        return [
+            'hayır', 'iptal', 'vazgeç', 'istemiyorum', 'yapma',
+            'no', 'cancel', 'abort', 'reject', 'stop',
+        ];
     }
 }
