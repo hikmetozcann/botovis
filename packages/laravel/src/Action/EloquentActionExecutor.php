@@ -103,6 +103,12 @@ class EloquentActionExecutor implements ActionExecutorInterface
             return ActionResult::ok('Sonuç bulunamadı.', [], 0);
         }
 
+        // When using select, disable appends to prevent accessor errors
+        // (accessors may depend on columns not in the select list)
+        if (!empty($select)) {
+            $records->each(fn ($record) => $record->setAppends([]));
+        }
+
         return ActionResult::ok(
             "{$records->count()} kayıt bulundu.",
             $records->toArray(),
