@@ -190,7 +190,7 @@ export class BotovisChat extends HTMLElement {
 
     return `
       <div class="bv-empty" id="empty-state">
-        <div class="bv-empty-icon">🤖</div>
+        <div class="bv-empty-icon">${icons.command}</div>
         <div class="bv-empty-text">${this.i('emptyState')}</div>
         ${suggestHtml}
       </div>
@@ -203,13 +203,20 @@ export class BotovisChat extends HTMLElement {
     // Delegation on shadow root
     this.shadow.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
+      
+      // FAB button - check if click is on fab or any child of fab
+      const fab = target.closest('#fab') as HTMLElement | null;
+      if (fab) {
+        this.toggle();
+        return;
+      }
+
       const btn = target.closest('[id], [data-action]') as HTMLElement | null;
       if (!btn) return;
 
       const id = btn.id;
       const action = btn.dataset.action;
 
-      if (id === 'fab')       this.toggle();
       if (id === 'btn-close') this.close();
       if (id === 'btn-send')  this.handleSend();
       if (id === 'btn-reset') this.handleReset();
@@ -526,8 +533,8 @@ export class BotovisChat extends HTMLElement {
 
     if (result) {
       html += result.success
-        ? `<div class="bv-result-success" style="margin-top:8px">✅ ${this.esc(result.message)}</div>`
-        : `<div class="bv-result-error" style="margin-top:8px">❌ ${this.esc(result.message)}</div>`;
+        ? `<div class="bv-result-success" style="margin-top:8px">${icons.checkCircle} ${this.esc(result.message)}</div>`
+        : `<div class="bv-result-error" style="margin-top:8px">${icons.xCircle} ${this.esc(result.message)}</div>`;
 
       if (result.success && result.data) {
         html += this.renderDataTable(result.data as Record<string, unknown>[]);
@@ -571,8 +578,8 @@ export class BotovisChat extends HTMLElement {
 
     if (result) {
       html += result.success
-        ? `<div class="bv-result-success" style="margin-top:8px">✅ ${this.esc(result.message)}</div>`
-        : `<div class="bv-result-error" style="margin-top:8px">❌ ${this.esc(result.message)}</div>`;
+        ? `<div class="bv-result-success" style="margin-top:8px">${icons.checkCircle} ${this.esc(result.message)}</div>`
+        : `<div class="bv-result-error" style="margin-top:8px">${icons.xCircle} ${this.esc(result.message)}</div>`;
 
       if (result.success && result.data) {
         const data = result.data as Record<string, unknown>[] | Record<string, unknown>;
@@ -593,7 +600,7 @@ export class BotovisChat extends HTMLElement {
   private renderRejectedMsg(msg: ChatMessage): string {
     return `
       <div class="bv-msg bv-msg-assistant">
-        <div class="bv-rejected-msg">❌ ${this.esc(msg.content || this.i('operationCancelled'))}</div>
+        <div class="bv-rejected-msg">${icons.xCircle} ${this.esc(msg.content || this.i('operationCancelled'))}</div>
         <span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span>
       </div>`;
   }
@@ -601,7 +608,7 @@ export class BotovisChat extends HTMLElement {
   private renderErrorMsg(msg: ChatMessage): string {
     return `
       <div class="bv-msg bv-msg-assistant">
-        <div class="bv-result-error">⚠️ ${this.esc(msg.content)}</div>
+        <div class="bv-result-error">${icons.alert} ${this.esc(msg.content)}</div>
         <span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span>
       </div>`;
   }
@@ -644,7 +651,7 @@ export class BotovisChat extends HTMLElement {
 
     return `
       <div class="bv-intent-card">
-        <div class="bv-intent-header">${actionIcon(intent.action)} ${this.i('actionDetected')}</div>
+        <div class="bv-intent-header">${icons.target} ${this.i('actionDetected')}</div>
         <div class="bv-intent-body">${rows}</div>
       </div>`;
   }
