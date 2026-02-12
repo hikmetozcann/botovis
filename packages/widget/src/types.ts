@@ -23,7 +23,8 @@ export type MessageType =
   | 'executed'
   | 'rejected'
   | 'error'
-  | 'loading';
+  | 'loading'
+  | 'streaming';
 
 export interface ChatMessage {
   id: string;
@@ -33,6 +34,8 @@ export interface ChatMessage {
   timestamp: Date;
   intent?: ResolvedIntent | null;
   result?: ActionResult | null;
+  /** Snapshot of agent steps from streaming (for timeline rendering) */
+  _steps?: Array<{step: number; thought: string; action?: string; observation?: string}>;
 }
 
 export interface ResolvedIntent {

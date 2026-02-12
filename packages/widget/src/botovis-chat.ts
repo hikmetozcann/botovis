@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────
-//  Botovis Widget — Main Custom Element
+//  Botovis Widget — Main Custom Element (v2 Drawer)
 // ─────────────────────────────────────────────────
 
 import { BotovisApi, BotovisApiError } from './api';
@@ -16,8 +16,6 @@ import type {
   SuggestedAction,
   ConversationSummary,
 } from './types';
-
-export type ViewMode = 'chat' | 'history';
 
 export class BotovisChat extends HTMLElement {
 
@@ -39,15 +37,25 @@ export class BotovisChat extends HTMLElement {
   private schemaTables: SchemaTable[] = [];
   private darkMediaQuery: MediaQueryList | null = null;
   private boundKeyHandler: ((e: KeyboardEvent) => void) | null = null;
-  
-  // Conversation history
-  private viewMode: ViewMode = 'chat';
+
+  // History
+  private isHistoryOpen = false;
   private conversations: ConversationSummary[] = [];
   private isLoadingHistory = false;
 
-  // Streaming state
+  // Streaming
   private streamController: AbortController | null = null;
   private currentStreamingMessageId: string | null = null;
+  private streamingSteps: Array<{step: number; thought: string; action?: string; observation?: string}> = [];
+
+  // Resize
+  private drawerWidth = 420;
+
+  // Timeline expand state
+  private expandedTimelines = new Set<string>();
+
+  // Current theme state
+  private isDarkTheme = false;
 
   constructor() {
     super();
@@ -62,6 +70,7 @@ export class BotovisChat extends HTMLElement {
     this.bindEvents();
     this.setupKeyboard();
     this.setupTheme();
+    this.setupResize();
     this.fetchSchema();
   }
 
@@ -107,11 +116,8 @@ export class BotovisChat extends HTMLElement {
 
   toggle(): void {
     this.isOpen = !this.isOpen;
-    this.$('panel')?.classList.toggle('bv-open', this.isOpen);
-    this.$('fab')?.classList.toggle('bv-open', this.isOpen);
-
-    const fabIcon = this.$('fab-icon');
-    if (fabIcon) fabIcon.innerHTML = this.isOpen ? icons.close : icons.chat;
+    this.$('drawer')?.classList.toggle('bv-open', this.isOpen);
+    this.$('fab')?.classList.toggle('bv-hidden', this.isOpen);
 
     if (this.isOpen) {
       this.unreadCount = 0;
@@ -122,17 +128,24 @@ export class BotovisChat extends HTMLElement {
     this.dispatchEvent(new CustomEvent(this.isOpen ? 'botovis:open' : 'botovis:close'));
   }
 
+  // ── Send ───────────────────────────────────────
+
   async send(text: string): Promise<void> {
     if (!text.trim() || this.isLoading) return;
 
     this.addUserMessage(text);
-    this.setLoading(true);
 
-    // Use streaming if enabled
     if (this.cfg.streaming) {
+      // For streaming: just disable send button, don't add loading dots
+      // (the streaming placeholder message handles the loading UI)
+      this.isLoading = true;
+      const sendBtn = this.$('btn-send') as HTMLButtonElement | null;
+      if (sendBtn) sendBtn.disabled = true;
       this.sendWithStreaming(text);
       return;
     }
+
+    this.setLoading(true);
 
     try {
       const response = await this.api.chat(text, this.conversationId ?? undefined);
@@ -145,8 +158,9 @@ export class BotovisChat extends HTMLElement {
   }
 
   private sendWithStreaming(text: string): void {
-    // Create a placeholder message for streaming
+    this.streamingSteps = [];
     this.currentStreamingMessageId = this.uid();
+
     this.addMessage({
       id: this.currentStreamingMessageId,
       role: 'assistant',
@@ -164,15 +178,19 @@ export class BotovisChat extends HTMLElement {
         },
 
         onStep: (step) => {
-          // Emit event for step visibility
           this.dispatchEvent(new CustomEvent('botovis:step', { detail: step }));
-          
-          // Update placeholder with thinking indicator
-          this.updateStreamingMessage(`🤔 ${step.thought}`);
+
+          this.streamingSteps.push({
+            step: step.step,
+            thought: step.thought,
+            action: step.action ?? undefined,
+            observation: step.observation ?? undefined,
+          });
+
+          this.updateStreamingStepsUI();
         },
 
         onMessage: (content) => {
-          // Replace placeholder with final message
           this.finalizeStreamingMessage(content, 'text');
         },
 
@@ -209,14 +227,75 @@ export class BotovisChat extends HTMLElement {
     );
   }
 
-  private updateStreamingMessage(content: string): void {
+  private updateStreamingStepsUI(): void {
     if (!this.currentStreamingMessageId) return;
 
     const msgIndex = this.messages.findIndex(m => m.id === this.currentStreamingMessageId);
-    if (msgIndex !== -1) {
-      this.messages[msgIndex].content = content;
-      this.renderMessages();
+    if (msgIndex === -1) return;
+
+    const steps = this.streamingSteps;
+    const currentStep = steps[steps.length - 1];
+    if (!currentStep) return;
+
+    const completedCount = steps.filter(s => s.observation).length;
+    const isRunningTool = currentStep.action && !currentStep.observation;
+
+    // Build timeline steps
+    let timelineHtml = '';
+    for (const s of steps) {
+      const isDone = !!s.observation;
+      const isActive = s === currentStep && !isDone;
+      const cls = isDone ? 'bv-done' : (isActive ? 'bv-running' : '');
+
+      timelineHtml += `<div class="bv-tl-step ${cls}">`;
+      timelineHtml += `<div class="bv-tl-thought">${this.escapeHtml(s.thought)}</div>`;
+      if (s.action) {
+        timelineHtml += `<div class="bv-tl-action">${this.escapeHtml(this.formatToolName(s.action))}</div>`;
+      }
+      timelineHtml += `</div>`;
     }
+
+    const thinkingText = isRunningTool
+      ? `${this.i('running')}: ${this.formatToolName(currentStep.action!)}`
+      : currentStep.thought;
+
+    const html = `
+      <div class="bv-thinking-line">
+        <div class="bv-spinner"></div>
+        <span class="bv-thinking-label">${this.escapeHtml(thinkingText)}</span>
+        ${completedCount > 0 ? `<span class="bv-thinking-count">${completedCount} araç</span>` : ''}
+      </div>
+      <div class="bv-timeline bv-visible">${timelineHtml}</div>
+    `;
+
+    this.messages[msgIndex].type = 'streaming';
+    this.messages[msgIndex].content = html;
+    this.renderMessages();
+  }
+
+  private formatToolName(action: string): string {
+    const match = action.match(/^(\w+)/);
+    if (match) {
+      const name = match[1];
+      const names: Record<string, string> = {
+        'search_records': 'arama',
+        'count_records': 'sayım',
+        'get_sample_data': 'veri çekme',
+        'get_column_stats': 'istatistik',
+        'aggregate': 'hesaplama',
+        'create_record': 'oluşturma',
+        'update_record': 'güncelleme',
+        'delete_record': 'silme',
+      };
+      return names[name] || name.replace(/_/g, ' ');
+    }
+    return action.substring(0, 15);
+  }
+
+  private escapeHtml(text: string): string {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   private finalizeStreamingMessage(
@@ -228,11 +307,15 @@ export class BotovisChat extends HTMLElement {
 
     const msgIndex = this.messages.findIndex(m => m.id === this.currentStreamingMessageId);
     if (msgIndex !== -1) {
+      // Save timeline steps with the message for later rendering
+      const stepsSnapshot = [...this.streamingSteps];
+
       this.messages[msgIndex] = {
         ...this.messages[msgIndex],
         type,
         content,
         intent: intent || null,
+        _steps: stepsSnapshot,
       };
       this.renderMessages();
     }
@@ -259,7 +342,7 @@ export class BotovisChat extends HTMLElement {
     root.className = `bv-root${pos === 'bottom-left' ? ' bv-left' : ''}`;
     root.id = 'root';
     root.innerHTML = `
-      ${this.renderPanel()}
+      ${this.renderDrawer()}
       <button class="bv-fab" id="fab" aria-label="${this.i('shortcutToggle')}">
         <span class="bv-fab-icon" id="fab-icon">${icons.chat}</span>
         <span class="bv-badge" id="badge"></span>
@@ -270,34 +353,53 @@ export class BotovisChat extends HTMLElement {
     this.applyTheme();
   }
 
-  private renderPanel(): string {
+  private renderDrawer(): string {
     return `
-      <div class="bv-panel" id="panel">
+      <div class="bv-drawer" id="drawer" style="width:${this.drawerWidth}px">
+        <div class="bv-resize-handle" id="resize-handle"></div>
+
         <div class="bv-header">
-          <span class="bv-header-title" id="header-title">${icons.logo}</span>
-          <button class="bv-header-btn" id="btn-history" title="${this.i('conversations')}">${icons.clock}</button>
-          <button class="bv-header-btn" id="btn-new" title="${this.i('newConversation')}">${icons.plus}</button>
-          <button class="bv-header-btn" id="btn-reset" title="${this.i('reset')}">${icons.refresh}</button>
-          <button class="bv-header-btn" id="btn-close" title="${this.i('close')}">${icons.minimize}</button>
+          <div class="bv-header-logo">
+            ${icons.logo}
+          </div>
+          <button class="bv-hbtn" id="btn-new" title="${this.i('newConversation')}">${icons.plus}</button>
+          <button class="bv-hbtn" id="btn-history" title="${this.i('conversations')}">${icons.clock}</button>
+          <span class="bv-hsep"></span>
+          <button class="bv-hbtn" id="btn-theme" title="${this.i('themeLight')}">${icons.sun}</button>
+          <button class="bv-hbtn" id="btn-close" title="${this.i('close')}">${icons.close}</button>
         </div>
-        <div class="bv-view-container">
+
+        <div class="bv-content">
+          <!-- History overlay -->
+          <div class="bv-history-panel" id="history-panel">
+            <div class="bv-history-header">
+              <button class="bv-hbtn" id="btn-history-back">${icons.arrowLeft}</button>
+              <span class="bv-history-title">${this.i('conversations')}</span>
+            </div>
+            <div class="bv-history-list" id="history-list">
+              ${this.renderHistoryContent()}
+            </div>
+          </div>
+
+          <!-- Messages -->
           <div class="bv-messages" id="messages">
             ${this.renderEmptyState()}
           </div>
-          <div class="bv-history" id="history" style="display: none;">
-            ${this.renderHistoryContent()}
-          </div>
         </div>
+
         <div class="bv-input-area">
-          <textarea class="bv-textarea" id="input"
-            placeholder="${this.esc(this.cfg.placeholder)}"
-            rows="1"
-            aria-label="${this.i('placeholder')}"
-          ></textarea>
-          <button class="bv-send-btn" id="btn-send" title="${this.i('send')}">${icons.send}</button>
+          <div class="bv-input-row">
+            <textarea class="bv-textarea" id="input"
+              placeholder="${this.esc(this.cfg.placeholder)}"
+              rows="1"
+              aria-label="${this.i('placeholder')}"
+            ></textarea>
+            <button class="bv-send-btn" id="btn-send" title="${this.i('send')}">${icons.send}</button>
+          </div>
+          <div class="bv-input-suggestions" id="input-suggestions"></div>
         </div>
         <div class="bv-input-hint">
-          <span class="bv-kbd">Enter</span> ${this.i('shortcutSend')} · <span class="bv-kbd">Shift+Enter</span> ${this.i('shortcutNewline')} · <span class="bv-kbd">Esc</span> ${this.i('shortcutClose')}
+          <span class="bv-kbd">Enter</span> ${this.i('shortcutSend')} · <span class="bv-kbd">Esc</span> ${this.i('shortcutClose')}
         </div>
       </div>
     `;
@@ -305,34 +407,29 @@ export class BotovisChat extends HTMLElement {
 
   private renderHistoryContent(): string {
     if (this.isLoadingHistory) {
-      return `<div class="bv-history-loading">${this.i('loadingConversations')}</div>`;
+      return `<div class="bv-history-empty">${this.i('loadingConversations')}</div>`;
     }
 
     if (this.conversations.length === 0) {
       return `
         <div class="bv-history-empty">
-          <div class="bv-history-empty-icon">${icons.messageSquare}</div>
-          <div class="bv-history-empty-text">${this.i('noConversations')}</div>
+          ${icons.messageSquare}
+          <span>${this.i('noConversations')}</span>
         </div>
       `;
     }
 
-    return `
-      <div class="bv-history-list">
-        ${this.conversations.map(conv => `
-          <div class="bv-history-item" data-action="select-conversation" data-id="${conv.id}">
-            <div class="bv-history-item-content">
-              <div class="bv-history-item-title">${this.esc(conv.title)}</div>
-              <div class="bv-history-item-preview">${conv.last_message ? this.esc(conv.last_message.substring(0, 60)) : ''}</div>
-              <div class="bv-history-item-meta">${this.formatDate(conv.updated_at)} · ${conv.message_count} mesaj</div>
-            </div>
-            <button class="bv-history-item-delete" data-action="delete-conversation" data-id="${conv.id}" title="${this.i('deleteConversation')}">
-              ${icons.trash}
-            </button>
-          </div>
-        `).join('')}
+    return this.conversations.map(conv => `
+      <div class="bv-history-item" data-action="select-conversation" data-id="${conv.id}">
+        <div class="bv-history-item-content">
+          <div class="bv-history-item-title">${this.esc(conv.title)}</div>
+          <div class="bv-history-item-meta">${this.formatDate(conv.updated_at)} · ${conv.message_count} mesaj</div>
+        </div>
+        <button class="bv-history-item-delete" data-action="delete-conversation" data-id="${conv.id}" title="${this.i('deleteConversation')}">
+          ${icons.trash}
+        </button>
       </div>
-    `;
+    `).join('');
   }
 
   private formatDate(dateStr: string): string {
@@ -340,7 +437,7 @@ export class BotovisChat extends HTMLElement {
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    
+
     if (days === 0) {
       return date.toLocaleTimeString(this.locale, { hour: '2-digit', minute: '2-digit' });
     } else if (days === 1) {
@@ -356,7 +453,6 @@ export class BotovisChat extends HTMLElement {
     const suggestions = this.generateSuggestions();
     const suggestHtml = suggestions.length > 0
       ? `<div class="bv-suggestions">
-           <div class="bv-suggestion-label">${this.i('suggestedActions')}</div>
            ${suggestions.map(s => `
              <button class="bv-suggestion" data-action="suggest" data-message="${this.esc(s.message)}">
                <span class="bv-suggestion-icon">${s.icon}</span>
@@ -378,16 +474,12 @@ export class BotovisChat extends HTMLElement {
   // ── Event Binding ──────────────────────────────
 
   private bindEvents(): void {
-    // Delegation on shadow root
     this.shadow.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
-      
-      // FAB button - check if click is on fab or any child of fab
+
+      // FAB
       const fab = target.closest('#fab') as HTMLElement | null;
-      if (fab) {
-        this.toggle();
-        return;
-      }
+      if (fab) { this.toggle(); return; }
 
       const btn = target.closest('[id], [data-action]') as HTMLElement | null;
       if (!btn) return;
@@ -396,13 +488,14 @@ export class BotovisChat extends HTMLElement {
       const action = btn.dataset.action;
 
       if (id === 'btn-close') this.close();
-      if (id === 'btn-send')  this.handleSend();
-      if (id === 'btn-reset') this.handleReset();
-      if (id === 'btn-history') this.toggleHistory();
+      if (id === 'btn-send') this.handleSend();
       if (id === 'btn-new') this.startNewConversation();
+      if (id === 'btn-history') this.toggleHistory();
+      if (id === 'btn-history-back') this.toggleHistory();
+      if (id === 'btn-theme') this.toggleTheme();
 
       if (action === 'confirm') this.handleConfirm();
-      if (action === 'reject')  this.handleReject();
+      if (action === 'reject') this.handleReject();
       if (action === 'suggest') {
         const msg = btn.dataset.message;
         if (msg) this.send(msg);
@@ -416,9 +509,13 @@ export class BotovisChat extends HTMLElement {
         const convId = btn.dataset.id;
         if (convId) this.deleteConversation(convId);
       }
+      if (action === 'toggle-timeline') {
+        const msgId = btn.dataset.msgId;
+        if (msgId) this.toggleTimeline(msgId);
+      }
     });
 
-    // Textarea auto-resize + Enter to send
+    // Textarea
     const textarea = this.$('input') as HTMLTextAreaElement | null;
     if (textarea) {
       textarea.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -437,17 +534,57 @@ export class BotovisChat extends HTMLElement {
 
   private setupKeyboard(): void {
     this.boundKeyHandler = (e: KeyboardEvent) => {
-      // Ctrl+K / Cmd+K → toggle
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         this.toggle();
       }
-      // Escape → close
       if (e.key === 'Escape' && this.isOpen) {
-        this.close();
+        if (this.isHistoryOpen) {
+          this.toggleHistory();
+        } else {
+          this.close();
+        }
       }
     };
     document.addEventListener('keydown', this.boundKeyHandler);
+  }
+
+  // ── Resize ─────────────────────────────────────
+
+  private setupResize(): void {
+    const handle = this.$('resize-handle');
+    if (!handle) return;
+
+    const isLeft = this.cfg.position === 'bottom-left';
+    let startX = 0;
+    let startWidth = 0;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const diff = isLeft ? (e.clientX - startX) : (startX - e.clientX);
+      const newWidth = Math.max(320, Math.min(startWidth + diff, window.innerWidth * 0.9));
+      this.drawerWidth = newWidth;
+      const drawer = this.$('drawer') as HTMLElement;
+      if (drawer) drawer.style.width = newWidth + 'px';
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      handle.classList.remove('bv-active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    handle.addEventListener('mousedown', (e: MouseEvent) => {
+      e.preventDefault();
+      startX = e.clientX;
+      startWidth = this.drawerWidth;
+      handle.classList.add('bv-active');
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
   }
 
   // ── Theme ──────────────────────────────────────
@@ -465,12 +602,45 @@ export class BotovisChat extends HTMLElement {
     if (!root) return;
 
     const theme = this.cfg.theme;
-    let dark = false;
+    if (theme === 'dark') this.isDarkTheme = true;
+    else if (theme === 'light') this.isDarkTheme = false;
+    else this.isDarkTheme = !!this.darkMediaQuery?.matches;
 
-    if (theme === 'dark') dark = true;
-    else if (theme === 'auto') dark = !!this.darkMediaQuery?.matches;
+    root.classList.toggle('bv-dark', this.isDarkTheme);
+    this.updateThemeButton();
+  }
 
-    root.classList.toggle('bv-dark', dark);
+  private toggleTheme(): void {
+    this.isDarkTheme = !this.isDarkTheme;
+    const root = this.$('root');
+    if (root) root.classList.toggle('bv-dark', this.isDarkTheme);
+    this.updateThemeButton();
+  }
+
+  private updateThemeButton(): void {
+    const btn = this.$('btn-theme');
+    if (btn) {
+      btn.innerHTML = this.isDarkTheme ? icons.moon : icons.sun;
+      btn.title = this.isDarkTheme ? this.i('themeDark') : this.i('themeLight');
+    }
+  }
+
+  // ── Timeline Toggle ────────────────────────────
+
+  private toggleTimeline(msgId: string): void {
+    const el = this.shadow.querySelector(`[data-timeline-id="${msgId}"]`) as HTMLElement;
+    const btn = this.shadow.querySelector(`[data-msg-id="${msgId}"]`) as HTMLElement;
+    if (!el) return;
+
+    if (this.expandedTimelines.has(msgId)) {
+      this.expandedTimelines.delete(msgId);
+      el.classList.remove('bv-visible');
+      btn?.classList.remove('bv-expanded');
+    } else {
+      this.expandedTimelines.add(msgId);
+      el.classList.add('bv-visible');
+      btn?.classList.add('bv-expanded');
+    }
   }
 
   // ── Message Flow ───────────────────────────────
@@ -487,7 +657,6 @@ export class BotovisChat extends HTMLElement {
 
   private async handleConfirm(): Promise<void> {
     if (!this.conversationId || !this.hasPending) return;
-
     this.hasPending = false;
     this.disableConfirmButtons();
     this.setLoading(true);
@@ -504,7 +673,6 @@ export class BotovisChat extends HTMLElement {
 
   private async handleReject(): Promise<void> {
     if (!this.conversationId || !this.hasPending) return;
-
     this.hasPending = false;
     this.disableConfirmButtons();
     this.setLoading(true);
@@ -534,7 +702,6 @@ export class BotovisChat extends HTMLElement {
   private processResponse(response: ApiResponse): void {
     this.conversationId = response.conversation_id;
 
-    // Render auto-continue intermediate steps
     if (response.steps?.length) {
       for (const step of response.steps) {
         this.addMessage({
@@ -587,7 +754,6 @@ export class BotovisChat extends HTMLElement {
         break;
     }
 
-    // Sound notification when panel is closed
     if (!this.isOpen && this.cfg.sounds) this.playSound();
   }
 
@@ -622,11 +788,9 @@ export class BotovisChat extends HTMLElement {
     this.messages.push(msg);
     const container = this.$('messages')!;
 
-    // Remove empty state if present
     const empty = container.querySelector('.bv-empty');
     if (empty) empty.remove();
 
-    // Create message element
     const wrapper = document.createElement('div');
     wrapper.innerHTML = this.renderMessage(msg);
     const el = wrapper.firstElementChild;
@@ -634,13 +798,9 @@ export class BotovisChat extends HTMLElement {
 
     this.scrollToBottom();
 
-    // Increment unread when closed
     if (!this.isOpen && msg.role === 'assistant') {
       this.unreadCount++;
       this.updateBadge();
-      // Pulse the FAB
-      this.$('fab')?.classList.add('bv-pulse');
-      setTimeout(() => this.$('fab')?.classList.remove('bv-pulse'), 4000);
     }
   }
 
@@ -683,10 +843,6 @@ export class BotovisChat extends HTMLElement {
     }
   }
 
-  /**
-   * Re-render all messages in the container.
-   * Used when loading a conversation from history or starting a new one.
-   */
   private renderMessages(): void {
     const container = this.$('messages');
     if (!container) return;
@@ -696,14 +852,11 @@ export class BotovisChat extends HTMLElement {
       return;
     }
 
-    container.innerHTML = this.messages
-      .map(msg => this.renderMessage(msg))
-      .join('');
-
+    container.innerHTML = this.messages.map(msg => this.renderMessage(msg)).join('');
     this.scrollToBottom();
   }
 
-  // ── Message Rendering ──────────────────────────
+  // ── Message Rendering (Flat Style) ─────────────
 
   private renderMessage(msg: ChatMessage): string {
     switch (msg.type) {
@@ -713,22 +866,42 @@ export class BotovisChat extends HTMLElement {
       case 'executed':     return this.renderExecutedMsg(msg);
       case 'rejected':     return this.renderRejectedMsg(msg);
       case 'error':        return this.renderErrorMsg(msg);
+      case 'streaming':    return this.renderStreamingMsg(msg);
       default:             return this.renderTextMsg(msg);
     }
   }
 
-  private renderTextMsg(msg: ChatMessage): string {
-    if (msg.role === 'user') {
-      return `
-        <div class="bv-msg bv-msg-user">
-          <div class="bv-bubble">${this.esc(msg.content)}</div>
-          <span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span>
-        </div>`;
-    }
+  private msgHeader(msg: ChatMessage): string {
+    const isUser = msg.role === 'user';
+    const avatar = isUser ? 'S' : 'B';
+    const name = isUser ? this.i('you') : this.i('assistant');
+
+    return `
+      <div class="bv-msg-header">
+        <div class="bv-msg-avatar">${avatar}</div>
+        <span class="bv-msg-name">${name}</span>
+        <span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span>
+      </div>`;
+  }
+
+  private renderStreamingMsg(msg: ChatMessage): string {
     return `
       <div class="bv-msg bv-msg-assistant">
-        <div class="bv-bubble bv-bubble-md">${this.markdown(msg.content)}</div>
-        <span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span>
+        ${this.msgHeader(msg)}
+        <div class="bv-msg-body">${msg.content}</div>
+      </div>`;
+  }
+
+  private renderTextMsg(msg: ChatMessage): string {
+    const cls = msg.role === 'user' ? 'bv-msg-user' : 'bv-msg-assistant';
+    const body = msg.role === 'user'
+      ? this.esc(msg.content)
+      : `<div class="bv-md">${this.renderStepsTimeline(msg)}${this.markdown(msg.content)}</div>`;
+
+    return `
+      <div class="bv-msg ${cls}">
+        ${this.msgHeader(msg)}
+        <div class="bv-msg-body">${body}</div>
       </div>`;
   }
 
@@ -737,26 +910,27 @@ export class BotovisChat extends HTMLElement {
     const result = msg.result;
     if (!intent) return this.renderTextMsg(msg);
 
-    let html = `<div class="bv-msg bv-msg-assistant">`;
-    html += this.renderIntentCard(intent);
+    let body = this.renderIntentCard(intent);
 
     if (result) {
-      html += result.success
-        ? `<div class="bv-result-success" style="margin-top:8px">${icons.checkCircle} ${this.esc(result.message)}</div>`
-        : `<div class="bv-result-error" style="margin-top:8px">${icons.xCircle} ${this.esc(result.message)}</div>`;
+      body += result.success
+        ? `<div class="bv-result-success">${icons.checkCircle} ${this.esc(result.message)}</div>`
+        : `<div class="bv-result-error">${icons.xCircle} ${this.esc(result.message)}</div>`;
 
       if (result.success && result.data) {
-        html += this.renderDataTable(result.data as Record<string, unknown>[]);
+        body += this.renderDataTable(result.data as Record<string, unknown>[]);
       }
     }
 
-    // Auto-continue step indicator
     if (intent.auto_continue) {
-      html += `<div class="bv-step-indicator"><span class="bv-step-dot"></span>${this.i('autoStep')}</div>`;
+      body += `<div class="bv-step-indicator"><span class="bv-step-dot"></span>${this.i('autoStep')}</div>`;
     }
 
-    html += `<span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span></div>`;
-    return html;
+    return `
+      <div class="bv-msg bv-msg-assistant">
+        ${this.msgHeader(msg)}
+        <div class="bv-msg-body">${body}</div>
+      </div>`;
   }
 
   private renderConfirmMsg(msg: ChatMessage): string {
@@ -765,15 +939,17 @@ export class BotovisChat extends HTMLElement {
 
     return `
       <div class="bv-msg bv-msg-assistant">
-        <div class="bv-confirm-card">
-          <div class="bv-confirm-title">${icons.alert} ${this.i('confirmQuestion')}</div>
-          ${this.renderIntentCard(intent)}
-          <div class="bv-confirm-actions">
-            <button class="bv-btn bv-btn-confirm" data-action="confirm">${icons.check} ${this.i('confirm')}</button>
-            <button class="bv-btn bv-btn-reject" data-action="reject">${icons.x} ${this.i('reject')}</button>
+        ${this.msgHeader(msg)}
+        <div class="bv-msg-body">
+          <div class="bv-confirm-card">
+            <div class="bv-confirm-title">${icons.alert} ${this.i('confirmQuestion')}</div>
+            ${this.renderIntentCard(intent)}
+            <div class="bv-confirm-actions">
+              <button class="bv-btn bv-btn-confirm" data-action="confirm">${icons.check} ${this.i('confirm')}</button>
+              <button class="bv-btn bv-btn-reject" data-action="reject">${icons.x} ${this.i('reject')}</button>
+            </div>
           </div>
         </div>
-        <span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span>
       </div>`;
   }
 
@@ -781,51 +957,60 @@ export class BotovisChat extends HTMLElement {
     const intent = msg.intent;
     const result = msg.result;
 
-    let html = `<div class="bv-msg bv-msg-assistant">`;
-
-    if (intent) html += this.renderIntentCard(intent);
+    let body = '';
+    if (intent) body += this.renderIntentCard(intent);
 
     if (result) {
-      html += result.success
-        ? `<div class="bv-result-success" style="margin-top:8px">${icons.checkCircle} ${this.esc(result.message)}</div>`
-        : `<div class="bv-result-error" style="margin-top:8px">${icons.xCircle} ${this.esc(result.message)}</div>`;
+      body += result.success
+        ? `<div class="bv-result-success">${icons.checkCircle} ${this.esc(result.message)}</div>`
+        : `<div class="bv-result-error">${icons.xCircle} ${this.esc(result.message)}</div>`;
 
       if (result.success && result.data) {
         const data = result.data as Record<string, unknown>[] | Record<string, unknown>;
-        // For write results show compact; for read show full table
         const isWrite = intent?.action && intent.action !== 'read';
         if (isWrite) {
-          html += this.renderCompactResult(data, intent!);
+          body += this.renderCompactResult(data, intent!);
         } else {
-          html += this.renderDataTable(Array.isArray(data) ? data : [data]);
+          body += this.renderDataTable(Array.isArray(data) ? data : [data]);
         }
       }
     }
 
-    html += `<span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span></div>`;
-    return html;
+    return `
+      <div class="bv-msg bv-msg-assistant">
+        ${this.msgHeader(msg)}
+        <div class="bv-msg-body">${body}</div>
+      </div>`;
   }
 
   private renderRejectedMsg(msg: ChatMessage): string {
     return `
       <div class="bv-msg bv-msg-assistant">
-        <div class="bv-rejected-msg">${icons.xCircle} ${this.esc(msg.content || this.i('operationCancelled'))}</div>
-        <span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span>
+        ${this.msgHeader(msg)}
+        <div class="bv-msg-body">
+          <div class="bv-rejected-msg">${icons.xCircle} ${this.esc(msg.content || this.i('operationCancelled'))}</div>
+        </div>
       </div>`;
   }
 
   private renderErrorMsg(msg: ChatMessage): string {
     return `
       <div class="bv-msg bv-msg-assistant">
-        <div class="bv-result-error">${icons.alert} ${this.esc(msg.content)}</div>
-        <span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span>
+        ${this.msgHeader(msg)}
+        <div class="bv-msg-body">
+          <div class="bv-result-error">${icons.alert} ${this.esc(msg.content)}</div>
+        </div>
       </div>`;
   }
 
   private renderLoading(): string {
     return `
       <div class="bv-msg bv-msg-assistant bv-msg-loading">
-        <div class="bv-typing">
+        <div class="bv-msg-header">
+          <div class="bv-msg-avatar">B</div>
+          <span class="bv-msg-name">${this.i('assistant')}</span>
+        </div>
+        <div class="bv-msg-body">
           <div class="bv-typing-dots">
             <span class="bv-typing-dot"></span>
             <span class="bv-typing-dot"></span>
@@ -833,6 +1018,40 @@ export class BotovisChat extends HTMLElement {
           </div>
         </div>
       </div>`;
+  }
+
+  // ── Steps Timeline ─────────────────────────────
+
+  private renderStepsTimeline(msg: ChatMessage): string {
+    const steps = msg._steps;
+    if (!steps || steps.length === 0) return '';
+
+    const isExpanded = this.expandedTimelines.has(msg.id);
+    const completedCount = steps.filter(s => s.observation).length;
+
+    let timelineHtml = '';
+    for (const s of steps) {
+      const isDone = !!s.observation;
+      const cls = isDone ? 'bv-done' : '';
+
+      timelineHtml += `<div class="bv-tl-step ${cls}">`;
+      timelineHtml += `<div class="bv-tl-thought">${this.escapeHtml(s.thought)}</div>`;
+      if (s.action) {
+        timelineHtml += `<div class="bv-tl-action">${this.escapeHtml(this.formatToolName(s.action))}</div>`;
+      }
+      timelineHtml += `</div>`;
+    }
+
+    return `
+      <button class="bv-timeline-toggle${isExpanded ? ' bv-expanded' : ''}" data-action="toggle-timeline" data-msg-id="${msg.id}">
+        ${icons.chevronRight}
+        ${this.i('steps', { count: steps.length })}
+        <span class="bv-tl-badge">${completedCount}</span>
+      </button>
+      <div class="bv-timeline${isExpanded ? ' bv-visible' : ''}" data-timeline-id="${msg.id}">
+        ${timelineHtml}
+      </div>
+    `;
   }
 
   // ── Shared Renderers ───────────────────────────
@@ -870,7 +1089,7 @@ export class BotovisChat extends HTMLElement {
 
     const total = data.length;
     const display = data.slice(0, maxRows);
-    const headers = Object.keys(display[0] || {}).slice(0, 8); // max 8 cols
+    const headers = Object.keys(display[0] || {}).slice(0, 8);
 
     let html = `<div class="bv-table-wrapper"><table class="bv-table"><thead><tr>`;
     for (const h of headers) {
@@ -882,16 +1101,14 @@ export class BotovisChat extends HTMLElement {
       html += '<tr>';
       for (const h of headers) {
         const val = row[h];
-        const display = this.cellStr(val);
-        html += `<td title="${this.esc(String(val ?? ''))}">${this.esc(display)}</td>`;
+        const str = this.cellStr(val);
+        html += `<td title="${this.esc(String(val ?? ''))}">${this.esc(str)}</td>`;
       }
       html += '</tr>';
     }
 
     html += '</tbody></table></div>';
-
-    html += `<div class="bv-table-footer">`;
-    html += this.i('resultsFound', { count: total });
+    html += `<div class="bv-table-footer">${this.i('resultsFound', { count: total })}`;
     if (total > maxRows) html += ` (${this.i('showingFirst', { count: maxRows })})`;
     html += `</div>`;
 
@@ -899,9 +1116,7 @@ export class BotovisChat extends HTMLElement {
   }
 
   private renderCompactResult(data: Record<string, unknown>[] | Record<string, unknown>, intent: ResolvedIntent): string {
-    // For write results, show only key fields (id + changed fields + where fields)
     const importantKeys = new Set(['id', ...Object.keys(intent.data || {}), ...Object.keys(intent.where || {})]);
-
     const records = Array.isArray(data) ? data : [data];
     if (records.length === 0) return '';
 
@@ -918,22 +1133,24 @@ export class BotovisChat extends HTMLElement {
     try {
       const schema = await this.api.getSchema();
       this.schemaTables = schema.tables || [];
-      // Re-render empty state with suggestions
+
+      // Render suggestions in both empty state and input area
       if (this.messages.length === 0) {
         const container = this.$('messages');
         if (container) container.innerHTML = this.renderEmptyState();
       }
+      this.renderInputSuggestions();
     } catch {
-      // Silently fail — suggestions just won't appear
+      // Silently fail
     }
   }
 
   private generateSuggestions(): SuggestedAction[] {
     const actions: SuggestedAction[] = [];
     for (const table of this.schemaTables.slice(0, 4)) {
-      const tableActions = table.actions || table.allowed_actions || [];
-      const tableName = table.table || table.name || '';
-      
+      const tableActions = table.actions || (table as any).allowed_actions || [];
+      const tableName = table.table || (table as any).name || '';
+
       if (tableActions.includes('read')) {
         actions.push({
           label: this.i('listAll', { table: tableName }),
@@ -950,6 +1167,18 @@ export class BotovisChat extends HTMLElement {
       }
     }
     return actions.slice(0, 6);
+  }
+
+  private renderInputSuggestions(): void {
+    const container = this.$('input-suggestions');
+    if (!container) return;
+
+    const suggestions = this.generateSuggestions();
+    if (suggestions.length === 0) return;
+
+    container.innerHTML = suggestions.slice(0, 4).map(s =>
+      `<button class="bv-input-chip" data-action="suggest" data-message="${this.esc(s.message)}">${this.esc(s.label)}</button>`
+    ).join('');
   }
 
   // ── Toast Notifications ────────────────────────
@@ -972,65 +1201,21 @@ export class BotovisChat extends HTMLElement {
   // ── Conversation History ───────────────────────
 
   private async toggleHistory(): Promise<void> {
-    if (this.viewMode === 'chat') {
-      this.viewMode = 'history';
-      this.showHistoryView();
+    this.isHistoryOpen = !this.isHistoryOpen;
+    const panel = this.$('history-panel');
+    if (panel) panel.classList.toggle('bv-visible', this.isHistoryOpen);
+
+    const btn = this.$('btn-history');
+    if (btn) btn.classList.toggle('bv-active', this.isHistoryOpen);
+
+    if (this.isHistoryOpen) {
       await this.fetchConversations();
-    } else {
-      this.viewMode = 'chat';
-      this.showChatView();
-    }
-  }
-
-  private showHistoryView(): void {
-    const messages = this.$('messages');
-    const history = this.$('history');
-    const inputArea = this.shadow.querySelector('.bv-input-area') as HTMLElement;
-    const inputHint = this.shadow.querySelector('.bv-input-hint') as HTMLElement;
-    
-    if (messages) messages.style.display = 'none';
-    if (history) history.style.display = 'block';
-    if (inputArea) inputArea.style.display = 'none';
-    if (inputHint) inputHint.style.display = 'none';
-    
-    // Update header title to text
-    const title = this.$('header-title');
-    if (title) title.innerHTML = this.i('conversations');
-    
-    // Update history button to back
-    const historyBtn = this.$('btn-history');
-    if (historyBtn) {
-      historyBtn.innerHTML = icons.arrowLeft;
-      historyBtn.title = this.i('backToChat');
-    }
-  }
-
-  private showChatView(): void {
-    const messages = this.$('messages');
-    const history = this.$('history');
-    const inputArea = this.shadow.querySelector('.bv-input-area') as HTMLElement;
-    const inputHint = this.shadow.querySelector('.bv-input-hint') as HTMLElement;
-    
-    if (messages) messages.style.display = 'flex';
-    if (history) history.style.display = 'none';
-    if (inputArea) inputArea.style.display = 'flex';
-    if (inputHint) inputHint.style.display = 'flex';
-    
-    // Update header title to logo
-    const title = this.$('header-title');
-    if (title) title.innerHTML = icons.logo;
-    
-    // Update back button to history
-    const historyBtn = this.$('btn-history');
-    if (historyBtn) {
-      historyBtn.innerHTML = icons.clock;
-      historyBtn.title = this.i('conversations');
     }
   }
 
   private async fetchConversations(): Promise<void> {
     this.isLoadingHistory = true;
-    this.updateHistoryView();
+    this.updateHistoryList();
 
     try {
       const response = await this.api.getConversations();
@@ -1040,34 +1225,33 @@ export class BotovisChat extends HTMLElement {
       this.conversations = [];
     } finally {
       this.isLoadingHistory = false;
-      this.updateHistoryView();
+      this.updateHistoryList();
     }
   }
 
-  private updateHistoryView(): void {
-    const history = this.$('history');
-    if (history) {
-      history.innerHTML = this.renderHistoryContent();
-    }
+  private updateHistoryList(): void {
+    const list = this.$('history-list');
+    if (list) list.innerHTML = this.renderHistoryContent();
   }
 
   private async loadConversation(id: string): Promise<void> {
     try {
       const response = await this.api.getConversation(id);
       const conv = response.conversation;
-      
+
       this.conversationId = conv.id;
       this.messages = conv.messages.map(m => ({
         id: m.id,
         role: m.role as 'user' | 'assistant',
-        type: m.role === 'user' ? 'text' : (m.success === false ? 'error' : 'text'),
+        type: m.role === 'user' ? 'text' as const : (m.success === false ? 'error' as const : 'text' as const),
         content: m.content,
         timestamp: new Date(m.created_at),
       }));
-      
-      // Switch to chat view
-      this.viewMode = 'chat';
-      this.showChatView();
+
+      // Close history and render messages
+      this.isHistoryOpen = false;
+      this.$('history-panel')?.classList.remove('bv-visible');
+      this.$('btn-history')?.classList.remove('bv-active');
       this.renderMessages();
     } catch (err) {
       console.error('Failed to load conversation:', err);
@@ -1079,10 +1263,9 @@ export class BotovisChat extends HTMLElement {
     try {
       await this.api.deleteConversation(id);
       this.conversations = this.conversations.filter(c => c.id !== id);
-      this.updateHistoryView();
+      this.updateHistoryList();
       this.toast(this.i('conversationDeleted'), 'success');
-      
-      // If we deleted the current conversation, reset
+
       if (this.conversationId === id) {
         this.conversationId = null;
         this.messages = [];
@@ -1098,13 +1281,13 @@ export class BotovisChat extends HTMLElement {
     this.conversationId = null;
     this.messages = [];
     this.hasPending = false;
-    
-    // If in history view, switch to chat
-    if (this.viewMode === 'history') {
-      this.viewMode = 'chat';
-      this.showChatView();
+
+    if (this.isHistoryOpen) {
+      this.isHistoryOpen = false;
+      this.$('history-panel')?.classList.remove('bv-visible');
+      this.$('btn-history')?.classList.remove('bv-active');
     }
-    
+
     this.renderMessages();
     this.$('input')?.focus();
   }
@@ -1141,60 +1324,67 @@ export class BotovisChat extends HTMLElement {
     return div.innerHTML;
   }
 
-  /**
-   * Render markdown in assistant messages.
-   * Supports: **bold**, *italic*, `code`, [link](url), headers, lists
-   */
   private markdown(text: string): string {
     if (!text) return '';
-    
-    // First escape HTML
+
     let html = this.esc(text);
-    
-    // Code blocks (```code```)
+
     html = html.replace(/```([\s\S]*?)```/g, '<pre class="bv-md-pre">$1</pre>');
-    
-    // Inline code (`code`)
+
+    // Markdown tables (must be before line break conversion)
+    html = html.replace(/((?:^\|.+\|$(?:\n|$))+)/gm, (block) => {
+      const lines = block.trim().split('\n').filter(l => l.trim());
+      if (lines.length < 2) return block;
+      // Check for separator line (|---|---|)
+      if (!/^\|[\s\-:|]+(?:\|[\s\-:|]+)+\|?$/.test(lines[1])) return block;
+
+      let t = '<div class="bv-table-wrapper"><table class="bv-table"><thead><tr>';
+      const hCells = lines[0].replace(/^\||\|$/g, '').split('|');
+      for (const c of hCells) t += `<th>${c.trim()}</th>`;
+      t += '</tr></thead><tbody>';
+
+      for (let i = 2; i < lines.length; i++) {
+        const cells = lines[i].replace(/^\||\|$/g, '').split('|');
+        if (cells.length === 0) continue;
+        t += '<tr>';
+        for (const c of cells) {
+          // Restore <br> tags that were escaped
+          let cell = c.trim().replace(/&lt;br&gt;/gi, '<br>');
+          // Apply inline formatting inside cells
+          cell = cell.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+          cell = cell.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+          t += `<td>${cell}</td>`;
+        }
+        t += '</tr>';
+      }
+
+      t += '</tbody></table></div>';
+      return t;
+    });
+
+    // Horizontal rule (---)
+    html = html.replace(/^---+$/gm, '<hr class="bv-md-hr">');
+
     html = html.replace(/`([^`]+)`/g, '<code class="bv-md-code">$1</code>');
-    
-    // Bold (**text** or __text__)
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-    
-    // Italic (*text* or _text_)
     html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
     html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
-    
-    // Links [text](url)
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-    
-    // Headers (# Header)
     html = html.replace(/^### (.+)$/gm, '<h4 class="bv-md-h4">$1</h4>');
     html = html.replace(/^## (.+)$/gm, '<h3 class="bv-md-h3">$1</h3>');
     html = html.replace(/^# (.+)$/gm, '<h2 class="bv-md-h2">$1</h2>');
-    
-    // Bullet lists (- item or * item)
     html = html.replace(/^[-*] (.+)$/gm, '<li class="bv-md-li">$1</li>');
-    // Wrap consecutive li elements in ul
-    html = html.replace(/(<li class="bv-md-li">.*<\/li>\n?)+/g, (match) => {
-      return '<ul class="bv-md-ul">' + match + '</ul>';
-    });
-    
-    // Numbered lists (1. item)
+    html = html.replace(/(<li class="bv-md-li">.*<\/li>\n?)+/g, (m) => '<ul class="bv-md-ul">' + m + '</ul>');
     html = html.replace(/^\d+\. (.+)$/gm, '<li class="bv-md-oli">$1</li>');
-    html = html.replace(/(<li class="bv-md-oli">.*<\/li>\n?)+/g, (match) => {
-      return '<ol class="bv-md-ol">' + match + '</ol>';
-    });
-    
-    // Line breaks (double newline = paragraph)
+    html = html.replace(/(<li class="bv-md-oli">.*<\/li>\n?)+/g, (m) => '<ol class="bv-md-ol">' + m + '</ol>');
     html = html.replace(/\n\n/g, '</p><p>');
     html = html.replace(/\n/g, '<br>');
-    
-    // Wrap in paragraph if not starting with block element
+
     if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<ol') && !html.startsWith('<pre')) {
       html = '<p>' + html + '</p>';
     }
-    
+
     return html;
   }
 

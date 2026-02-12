@@ -51,6 +51,13 @@ const translations: Record<Locale, Record<string, string>> = {
     loadingConversations: 'Yükleniyor...',
     deleteConversation: 'Sohbeti sil',
     conversationDeleted: 'Sohbet silindi',
+    you: 'Sen',
+    assistant: 'Botovis',
+    themeLight: 'Açık Tema',
+    themeDark: 'Koyu Tema',
+    toolsUsed: '{count} araç',
+    steps: '{count} adım',
+    running: 'Çalıştırılıyor',
   },
   en: {
     title: 'Botovis Assistant',
@@ -98,6 +105,13 @@ const translations: Record<Locale, Record<string, string>> = {
     loadingConversations: 'Loading...',
     deleteConversation: 'Delete conversation',
     conversationDeleted: 'Conversation deleted',
+    you: 'You',
+    assistant: 'Botovis',
+    themeLight: 'Light Theme',
+    themeDark: 'Dark Theme',
+    toolsUsed: '{count} tools',
+    steps: '{count} steps',
+    running: 'Running',
   },
 };
 

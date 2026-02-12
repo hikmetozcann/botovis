@@ -459,6 +459,9 @@ class BotovisController extends Controller
     private function createSseResponse(callable $callback): StreamedResponse
     {
         return new StreamedResponse(function () use ($callback) {
+            // Extend execution time for streaming (agent may take many steps)
+            set_time_limit(120);
+            
             // Disable all output buffering for real-time streaming
             while (ob_get_level() > 0) {
                 ob_end_flush();

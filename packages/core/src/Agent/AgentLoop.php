@@ -24,7 +24,7 @@ use Botovis\Core\Tools\ToolResult;
  */
 class AgentLoop
 {
-    private const DEFAULT_MAX_STEPS = 10;
+    private const DEFAULT_MAX_STEPS = 15;
 
     private ?SecurityContext $securityContext = null;
     
