@@ -78,6 +78,7 @@ class ChatCommand extends Command
                         $pending->action,
                         $pending->data,
                         $pending->where,
+                        $pending->select,
                     );
                     $conversation->clearPendingIntent();
                     $this->displayResult($result);
@@ -128,6 +129,7 @@ class ChatCommand extends Command
                             $intent->action,
                             $intent->data,
                             $intent->where,
+                            $intent->select,
                         );
                         $this->displayResult($result);
                         $conversation->addAssistantMessage($result->message);
@@ -169,16 +171,22 @@ class ChatCommand extends Command
         if (!empty($intent->data)) {
             $this->line("   Veri:");
             foreach ($intent->data as $key => $value) {
-                $this->line("     <fg=green>{$key}</>: {$value}");
+                $display = is_array($value) ? json_encode($value, JSON_UNESCAPED_UNICODE) : $value;
+                $this->line("     <fg=green>{$key}</>: {$display}");
             }
         }
 
         if (!empty($intent->where)) {
             $this->line("   Koşul:");
             foreach ($intent->where as $key => $value) {
-                $val = is_bool($value) ? ($value ? 'true' : 'false') : $value;
+                $val = is_array($value) ? json_encode($value, JSON_UNESCAPED_UNICODE)
+                     : (is_bool($value) ? ($value ? 'true' : 'false') : $value);
                 $this->line("     <fg=magenta>{$key}</> = {$val}");
             }
+        }
+
+        if (!empty($intent->select)) {
+            $this->line("   Sütunlar: <fg=blue>" . implode(', ', $intent->select) . "</>");
         }
 
         if ($intent->message) {

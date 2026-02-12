@@ -27,12 +27,23 @@ use Botovis\Core\Enums\IntentType;
  */
 final class ResolvedIntent
 {
+    /**
+     * @param IntentType      $type       Intent category
+     * @param ActionType|null $action     CRUD action type
+     * @param string|null     $table      Target table name
+     * @param array           $data       Data payload (columns => values) for CREATE/UPDATE
+     * @param array           $where      Filter conditions for READ/UPDATE/DELETE
+     * @param string[]        $select     Columns to return for READ (empty = all)
+     * @param string          $message    Human-readable message
+     * @param float           $confidence Confidence score 0.0-1.0
+     */
     public function __construct(
         public readonly IntentType $type,
         public readonly ?ActionType $action = null,
         public readonly ?string $table = null,
         public readonly array $data = [],
         public readonly array $where = [],
+        public readonly array $select = [],
         public readonly string $message = '',
         public readonly float $confidence = 0.0,
     ) {}
@@ -77,7 +88,7 @@ final class ResolvedIntent
         if (!empty($this->data)) {
             $fields = [];
             foreach ($this->data as $key => $value) {
-                $fields[] = "{$key}: {$value}";
+                $fields[] = "{$key}: " . self::valueToString($value);
             }
             $parts[] = "Veri: " . implode(', ', $fields);
         }
@@ -85,9 +96,13 @@ final class ResolvedIntent
         if (!empty($this->where)) {
             $conditions = [];
             foreach ($this->where as $key => $value) {
-                $conditions[] = "{$key} = {$value}";
+                $conditions[] = "{$key} = " . self::valueToString($value);
             }
             $parts[] = "Koşul: " . implode(', ', $conditions);
+        }
+
+        if (!empty($this->select)) {
+            $parts[] = "Sütunlar: " . implode(', ', $this->select);
         }
 
         return implode("\n", $parts);
@@ -101,8 +116,23 @@ final class ResolvedIntent
             'table' => $this->table,
             'data' => $this->data ?: null,
             'where' => $this->where ?: null,
+            'select' => $this->select ?: null,
             'message' => $this->message ?: null,
             'confidence' => $this->confidence,
         ], fn ($v) => $v !== null);
+    }
+
+    /**
+     * Safely convert any value to a string for display.
+     */
+    private static function valueToString(mixed $value): string
+    {
+        if (is_array($value)) {
+            return json_encode($value, JSON_UNESCAPED_UNICODE);
+        }
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+        return (string) $value;
     }
 }

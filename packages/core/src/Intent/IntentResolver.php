@@ -72,10 +72,13 @@ For CRUD actions:
   "table": "table_name",
   "data": {"column": "value"},
   "where": {"column": "value"},
+  "select": ["column1", "column2"],
   "message": "Human readable description of what you'll do",
   "confidence": 0.95
 }
 ```
+
+NOTE on "select": For READ actions, if the user asks for specific columns (e.g. "sadece isimlerini göster", "only names and phones"), put those column names in "select" array. If user wants all columns, omit "select" or set it to []. The "data" field is ONLY for CREATE/UPDATE payloads — never put column names in "data" for READ actions.
 
 For questions/help:
 ```json
@@ -148,6 +151,7 @@ PROMPT;
             table: $table,
             data: $parsed['data'] ?? [],
             where: $parsed['where'] ?? [],
+            select: $parsed['select'] ?? [],
             message: $parsed['message'] ?? '',
             confidence: (float) ($parsed['confidence'] ?? 0.0),
         );

@@ -24,7 +24,7 @@ class EloquentActionExecutor implements ActionExecutorInterface
         private readonly DatabaseSchema $schema,
     ) {}
 
-    public function execute(string $table, ActionType $action, array $data = [], array $where = []): ActionResult
+    public function execute(string $table, ActionType $action, array $data = [], array $where = [], array $select = []): ActionResult
     {
         $tableSchema = $this->schema->findTable($table);
 
@@ -45,7 +45,7 @@ class EloquentActionExecutor implements ActionExecutorInterface
         try {
             return match ($action) {
                 ActionType::CREATE => $this->executeCreate($modelClass, $data, $tableSchema->fillable),
-                ActionType::READ => $this->executeRead($modelClass, $where),
+                ActionType::READ => $this->executeRead($modelClass, $where, $select),
                 ActionType::UPDATE => $this->executeUpdate($modelClass, $data, $where, $tableSchema->fillable),
                 ActionType::DELETE => $this->executeDelete($modelClass, $where),
             };
@@ -77,10 +77,17 @@ class EloquentActionExecutor implements ActionExecutorInterface
         );
     }
 
-    private function executeRead(string $modelClass, array $where): ActionResult
+    private function executeRead(string $modelClass, array $where, array $select = []): ActionResult
     {
         /** @var \Illuminate\Database\Eloquent\Builder $query */
         $query = $modelClass::query();
+
+        // Apply column selection
+        if (!empty($select)) {
+            // Always include primary key for consistency
+            $columns = array_unique(array_merge(['id'], $select));
+            $query->select($columns);
+        }
 
         foreach ($where as $column => $value) {
             if (is_string($value) && str_contains($value, '%')) {

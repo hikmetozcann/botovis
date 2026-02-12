@@ -23,7 +23,8 @@ interface ActionExecutorInterface
      * @param ActionType $action The action type
      * @param array      $data   The data payload (columns => values)
      * @param array      $where  Conditions for READ/UPDATE/DELETE
+     * @param string[]   $select Columns to return for READ (empty = all)
      * @return ActionResult
      */
-    public function execute(string $table, ActionType $action, array $data = [], array $where = []): ActionResult;
+    public function execute(string $table, ActionType $action, array $data = [], array $where = [], array $select = []): ActionResult;
 }
