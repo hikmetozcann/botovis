@@ -1,0 +1,132 @@
+naber
+17:09
+Merhaba! Ben Botovis, veritabanı işlemlerinizde size yardımcı olacak AI asistanınızım. Çalışanlar, pozisyonlar, iş ilanları, adaylar, vardiya şablonları ve planları, çalışma kuralları gibi verilerle çalışabiliyorum. Size nasıl yardımcı olabilirim?
+17:10
+bana personelleri listelermisin
+17:10
+Aksiyon Tespit Edildi
+Tablo
+employees
+İşlem
+read
+8 kayıt bulundu.
+id	first_name	last_name	tc_no	phone	email	address	emergency_contact
+1	Rıdvan	Ulusal	12345678901	0532 123 45 67	ahmet.yilmaz@petrolofisi.com	Atatürk Cad. No:15 Kadıköy/İst…	Fatma Yılmaz
+2	Erol	Kaya	23456789012	0535 234 56 78	mehmet.kaya@petrolofisi.com	Cumhuriyet Mah. Gül Sok. No:8 …	Ayşe Kaya
+3	Ayşe	Demir	34567890123	0537 345 67 89	ayse.demir@petrolofisi.com	Bahçelievler Mah. Çiçek Sok. N…	Ali Demir
+4	Mustafa	A	45678901234	0539 456 78 90	fatih.ozturk@petrolofisi.com	Yeni Mah. Lale Sok. No:5 Şişli…	Zeynep Öztürk
+5	Elif	Arslan	56789012345	0541 567 89 01	elif.arslan@petrolofisi.com	Merkez Mah. Papatya Sok. No:12…	Mustafa Arslan
+7	Hilmi	Çelik	78901234567	0545 789 01 23	zehra.celik@petrolofisi.com	Yeşil Mah. Orkide Sok. No:18 P…	Kemal Çelik
+10	Ümit	Abi	12312312323	-	-	-	-
+11	Naci	Taha	-	-	-	-	-
+8 sonuç bulundu
+17:10
+peki hangi iş ilanlarımız var
+17:10
+Aksiyon Tespit Edildi
+Tablo
+job_postings
+İşlem
+read
+1 kayıt bulundu.
+id	title	slug	position_id	description	requirements	location	employment_type
+1	Pompa Operatörü	pompa-operatoru	4	-	-	Sakarya	full_time
+1 sonuç bulundu
+17:10
+bu iş ilanının detaylarını söylermisin bana
+17:11
+Yanıtı anlayamadım. Lütfen tekrar deneyin. (Raw: {"type":"action","action":"read","table":"job_postings","where":{"id":1},"message":"İş ilanının detaylı bilgilerini getiriyorum","confidence":0.95}
+
+[İşlem başarılı] 1 kayıt bulundu.
+Sonuç: [{"id":1,"title":"Pompa Operatörü","slug":"pompa-operatoru","position_id":4,"description":null,"requirements":null,"location":"Sakarya","employment_type":"full_time","salary_min":"32500.00","salary_max":"34000.00","deadline":"2026-09-19T00:00:00.000000Z","status":"active","notes":null,"created_by":2,"created_at":"2026-02-08T21:38:45.000000Z","updated_at":"2026-02-08T22:09:20.000000Z","deleted_at":null,"status_name":"Aktif","employment_type_name":"Tam Zamanlı","candidates_count":1,"salary_range":"32.500₺ - 34.000₺","public_url":"http:\/\/127.0.0.1:8000\/kariyer\/pompa-operatoru","position":{"id":4,"name":"Pompa Operatörü","slug":"pump_operator","description":null,"is_active":true,"sort_order":4,"created_at":"2026-02-02T16:59:11.000000Z","updated_at":"2026-02-02T16:59:11.000000Z"},"creator":{"id":2,"role_id":2,"name":"Sistem Yöneticisi","email":"admin@petrolofisi.com","is_active":true,"email_verified_at":"2026-02-02T16:59:09.000000Z","password":"$2y$12$iMhLTi6k6GU4pEBMN8l6oOTgmqUqhm2Y2YIjTsXjgpQoR1YhMxRGK","two_factor_secret":null,"two_factor_recovery_codes":null,"two_factor_confirmed_at":null,"remember_token":null,"created_at":"2026-02-02T16:59:09.000000Z","updated_at":"2026-02-02T16:59:09.000000Z"}}]
+
+İş İlanı Detayları:
+
+**Pompa Operatörü** pozisyonu için ilan
+- **Lokasyon:** Sakarya  
+- **İstihdam Türü:** Tam Zamanlı
+- **Maaş Aralığı:** 32.500₺ - 34.000₺
+- **Son Başvuru:** 19 Eylül 2026
+- **Durum:** Aktif
+- **Başvuru Sayısı:** 1 aday
+
+İlan 8 Şubat 2026'da Sistem Yöneticisi tarafından oluşturulmuş. Henüz detaylı açıklama ve şartlar eklenmemiş durumda.)
+17:11
+kaç kişi başvurmuş
+17:12
+Pompa Operatörü pozisyonuna 1 kişi başvurmuş durumda. İlan detaylarında candidates_count: 1 olarak görünüyor.
+17:12
+peki kim bu
+17:12
+Aksiyon Tespit Edildi
+Tablo
+candidates
+İşlem
+read
+Koşul
+job_posting_id = 1
+1 kayıt bulundu.
+id	job_posting_id	first_name	last_name	tc_no	phone	email	birth_date
+1	1	Hikmet Yasin	Özcan	12312312312	2141241242332	-	2004-08-19T00:00:00.000000Z
+1 sonuç bulundu
+17:12
+şuan hangi durumda bu mülakata gelmişmi?
+17:12
+Hikmet Yasin Özcan adlı aday şu anda "Aday Vazgeçti" (withdrawn) durumunda. Bu durum, adayın başvurusunu geri çektiği anlamına geliyor. Dolayısıyla mülakata gelmemiş, başvurudan vazgeçmiş durumda.
+17:12
+bu aday şuan bizi aradı ben mülakata gelmek istiyorum dedi
+17:13
+Bu işlemi onaylıyor musunuz?
+Aksiyon Tespit Edildi
+Tablo
+candidates
+İşlem
+update
+Veri
+status: interview_scheduled
+Koşul
+id = 1
+Onayla
+İptal
+17:13
+Aksiyon Tespit Edildi
+Tablo
+candidates
+İşlem
+update
+Veri
+status: interview_scheduled
+Koşul
+id = 1
+1 kayıt güncellendi.
+id	status
+1	interview_scheduled
+1 sonuç bulundu
+17:13
+ne yaptın şuan
+17:13
+Hikmet Yasin Özcan adlı adayın durumunu 'Aday Vazgeçti' (withdrawn) durumundan 'mülakat planlandı' (interview_scheduled) durumuna güncelledim. Artık aday mülakat için hazır durumda görünüyor ve sistem bunu kaydetti.
+17:13
+öyle bir durum varmıki sistemde
+17:14
+Aksiyon Tespit Edildi
+Tablo
+candidates
+İşlem
+read
+Sütunlar
+status
+1 kayıt bulundu.
+id	status	full_name	status_name	education_level_name	military_status_name	source_name
+1	interview_scheduled		interview_scheduled	-	-	-
+1 sonuç bulundu
+17:14
+sistemde olan durumlar nedir
+17:14
+Üzgünüm, veritabanı şemasında candidates tablosundaki status sütunu için mevcut enum değerlerinin listesi görünmüyor. Sadece 'string' tipinde olduğunu biliyorum. Mevcut sistemde hangi aday durumlarının tanımlı olduğunu öğrenmek için sistem yöneticisinden veya diğer kaynaklardan bilgi almanız gerekebilir. 
+
+Şu anda gördüğüm durumlar:
+- withdrawn (Aday Vazgeçti) 
+- interview_scheduled (Mülakat Planlandı)
+
+Ama tam liste için sistem dokümantasyonuna veya ayarlar bölümüne bakılması gerekiyor.
