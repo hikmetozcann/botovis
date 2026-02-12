@@ -92,7 +92,8 @@ class BotovisServiceProvider extends ServiceProvider
         // ── Blade directive: @botovisWidget ──
         Blade::directive('botovisWidget', function ($expression) {
             $defaults = "['endpoint' => '/' . config('botovis.route.prefix', 'botovis'), 'lang' => 'tr', 'theme' => 'auto', 'position' => 'bottom-right']";
-            return "<?php echo view('botovis::widget', array_merge({$defaults}, {$expression} ?: []))->render(); ?>";
+            $merged = empty($expression) ? $defaults : "array_merge({$defaults}, {$expression})";
+            return "<?php echo view('botovis::widget', {$merged})->render(); ?>";
         });
 
         // ── Artisan commands ──

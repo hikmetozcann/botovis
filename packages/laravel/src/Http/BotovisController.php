@@ -130,7 +130,7 @@ class BotovisController extends Controller
                 'columns' => array_map(fn ($c) => [
                     'name' => $c->name,
                     'type' => $c->type->value,
-                    'nullable' => $c->isNullable,
+                    'nullable' => $c->nullable,
                 ], $table->columns),
             ];
         }, $schema->tables);
