@@ -72,6 +72,15 @@ class DiscoverCommand extends Command
                 $flagStr = $flags ? ' ' . implode(' ', $flags) : '';
 
                 $this->line("   {$fillableMarker} {$col->name}: <fg=cyan>{$col->type->value}</>{$flagStr}");
+                
+                // Show enum values if present
+                if (!empty($col->enumValues)) {
+                    $enumStr = implode(', ', array_slice($col->enumValues, 0, 5));
+                    if (count($col->enumValues) > 5) {
+                        $enumStr .= '... +' . (count($col->enumValues) - 5) . ' more';
+                    }
+                    $this->line("      <fg=gray>Values: {$enumStr}</>");
+                }
             }
 
             // Relations

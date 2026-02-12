@@ -62,7 +62,7 @@ class IntentResolver
         $userContext = $this->buildUserContext();
 
         return <<<PROMPT
-You are Botovis, an AI assistant embedded in a web application. Your job is to understand user requests and convert them into structured database operations.
+You are Botovis, an AI assistant embedded in a web application. Your job is to understand user requests and convert them into structured database operations OR provide helpful analysis and recommendations based on data.
 
 {$userContext}
 
@@ -82,6 +82,10 @@ RULES:
    or say "shall I check?". Just do it.
    Example: "Yusuf'u müdür yap" → First READ positions where name=Müdür with auto_continue:true,
    then when you see the result, respond with UPDATE employees set position_id to the found ID.
+10. ANALYSIS & RECOMMENDATIONS: When the user asks for your opinion, analysis, or recommendations based on 
+    data (e.g. "bu aday hakkında ne düşünüyorsun?", "teklif yapalım mı?", "nasıl bir performans göstermiş?"),
+    use type "question" and provide a thoughtful analysis in the message field. You CAN and SHOULD interpret 
+    data, give opinions, and make recommendations. This is NOT a database operation — it's advice.
 
 {$schemaContext}
 
@@ -106,16 +110,16 @@ NOTE on "select": For READ actions, if the user asks for specific columns (e.g. 
 
 NOTE on "auto_continue": Set to true ONLY on READ actions that are prerequisite lookups for a follow-up action the user already requested. When auto_continue is true, the system will execute the READ and immediately ask you for the next step. Do NOT set auto_continue on standalone READs (user just wants to see data) or on write actions.
 
-For questions/help:
+For questions, analysis, opinions, and recommendations:
 ```json
 {
   "type": "question",
-  "message": "Your answer to the user's question",
+  "message": "Your detailed answer, analysis, or recommendation. Use markdown for formatting: **bold**, *italic*, - bullet points, etc.",
   "confidence": 1.0
 }
 ```
 
-When you need more info:
+When you need more info from user:
 ```json
 {
   "type": "clarification",
@@ -124,7 +128,7 @@ When you need more info:
 }
 ```
 
-IMPORTANT: Respond ONLY with the JSON object. No markdown, no extra text.
+CRITICAL: Always respond with ONLY the JSON object. No markdown code fences, no extra text before or after.
 PROMPT;
     }
 
@@ -175,9 +179,25 @@ PROMPT;
         $parsed = json_decode($response, true);
 
         if ($parsed === null || !isset($parsed['type'])) {
+            // Log raw response in debug mode
+            if (function_exists('config') && config('botovis.debug', false)) {
+                logger()->debug('Botovis: Could not parse LLM response as JSON', ['raw' => $response]);
+            }
+            
+            // If response looks like a plain text answer (not JSON), treat it as a question response
+            // This handles cases where LLM forgets JSON format but gives a useful answer
+            $responseLen = mb_strlen($response);
+            if ($responseLen > 20 && $responseLen < 3000 && !str_starts_with($response, '{')) {
+                return new ResolvedIntent(
+                    type: IntentType::QUESTION,
+                    message: $response,
+                    confidence: 0.7,
+                );
+            }
+            
             return new ResolvedIntent(
                 type: IntentType::UNKNOWN,
-                message: "Yanıtı anlayamadım. Lütfen tekrar deneyin. (Raw: {$response})",
+                message: "Yanıtı anlayamadım. Lütfen isteğinizi farklı şekilde ifade eder misiniz?",
             );
         }
 

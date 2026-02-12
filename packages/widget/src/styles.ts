@@ -883,6 +883,77 @@ export const styles = /*css*/`
   color: var(--bv-error);
 }
 
+/* ── Markdown Styles ──────────────────────── */
+
+.bv-bubble-md {
+  /* Reset paragraph margins within markdown bubbles */
+}
+
+.bv-bubble-md p {
+  margin: 0 0 0.5em 0;
+}
+
+.bv-bubble-md p:last-child {
+  margin-bottom: 0;
+}
+
+.bv-bubble-md strong {
+  font-weight: 600;
+}
+
+.bv-bubble-md em {
+  font-style: italic;
+}
+
+.bv-bubble-md a {
+  color: var(--bv-accent);
+  text-decoration: none;
+}
+
+.bv-bubble-md a:hover {
+  text-decoration: underline;
+}
+
+.bv-md-code {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.875em;
+  background: var(--bv-surface);
+  padding: 0.15em 0.4em;
+  border-radius: var(--bv-radius-xs);
+  color: var(--bv-accent);
+}
+
+.bv-md-pre {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--bv-surface);
+  padding: 0.75em 1em;
+  border-radius: var(--bv-radius-sm);
+  overflow-x: auto;
+  margin: 0.5em 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.bv-md-h2, .bv-md-h3, .bv-md-h4 {
+  font-weight: 600;
+  margin: 0.75em 0 0.25em 0;
+  line-height: 1.3;
+}
+
+.bv-md-h2 { font-size: 1.25em; }
+.bv-md-h3 { font-size: 1.1em; }
+.bv-md-h4 { font-size: 1em; }
+
+.bv-md-ul, .bv-md-ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.bv-md-li, .bv-md-oli {
+  margin: 0.25em 0;
+}
+
 /* ── Responsive (Mobile) ──────────────────── */
 
 @media (max-width: 480px) {

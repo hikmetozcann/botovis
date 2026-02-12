@@ -25,6 +25,17 @@ use Illuminate\Support\Facades\Schema;
 class EloquentSchemaDiscovery implements SchemaDiscoveryInterface
 {
     /**
+     * Common method patterns that return enum/option values
+     */
+    private const ENUM_METHOD_PATTERNS = [
+        'Options',   // statusOptions(), typeOptions()
+        'Labels',    // statusLabels(), typeLabels()
+        'Values',    // statusValues()
+        'Choices',   // statusChoices()
+        'List',      // statusList()
+    ];
+
+    /**
      * @param array<class-string<Model>, string[]> $modelConfig
      *        e.g. [Product::class => ['create', 'read', 'update']]
      */
@@ -63,11 +74,14 @@ class EloquentSchemaDiscovery implements SchemaDiscoveryInterface
     {
         $tableName = $model->getTable();
 
+        // Discover enum values from model methods
+        $enumValues = $this->discoverEnumValues($model, $modelClass);
+
         return new TableSchema(
             name: $tableName,
             modelClass: $modelClass,
             label: $this->guessLabel($modelClass),
-            columns: $this->discoverColumns($model, $tableName),
+            columns: $this->discoverColumns($model, $tableName, $enumValues),
             relations: $this->discoverRelations($model),
             allowedActions: $this->parseActions($actions),
             fillable: $model->getFillable(),
@@ -76,11 +90,77 @@ class EloquentSchemaDiscovery implements SchemaDiscoveryInterface
     }
 
     /**
+     * Discover enum values from model static methods like statusOptions(), typeLabels(), etc.
+     *
+     * @return array<string, string[]> Column name => possible values
+     */
+    private function discoverEnumValues(Model $model, string $modelClass): array
+    {
+        $enumValues = [];
+        $ref = new \ReflectionClass($modelClass);
+
+        foreach ($ref->getMethods(\ReflectionMethod::IS_PUBLIC | \ReflectionMethod::IS_STATIC) as $method) {
+            if ($method->class !== $modelClass) continue;
+            if ($method->getNumberOfRequiredParameters() > 0) continue;
+
+            $methodName = $method->getName();
+            
+            // Check if method matches patterns like statusOptions, typeLabels, etc.
+            foreach (self::ENUM_METHOD_PATTERNS as $pattern) {
+                if (str_ends_with($methodName, $pattern)) {
+                    $columnName = lcfirst(str_replace($pattern, '', $methodName));
+                    if (empty($columnName)) continue;
+
+                    try {
+                        $result = $model::$methodName();
+                        $values = $this->extractEnumValuesFromResult($result);
+                        if (!empty($values)) {
+                            $enumValues[$columnName] = $values;
+                        }
+                    } catch (\Throwable) {
+                        continue;
+                    }
+                    break;
+                }
+            }
+        }
+
+        return $enumValues;
+    }
+
+    /**
+     * Extract enum values from various result formats
+     */
+    private function extractEnumValuesFromResult(mixed $result): array
+    {
+        if (!is_array($result)) {
+            return [];
+        }
+
+        // Format: ['value' => 'label', ...]
+        if (array_is_list($result) === false) {
+            return array_keys($result);
+        }
+
+        // Format: [['value' => 'x', 'label' => 'X'], ...]
+        $values = [];
+        foreach ($result as $item) {
+            if (isset($item['value'])) {
+                $values[] = (string) $item['value'];
+            } elseif (is_string($item) || is_int($item)) {
+                $values[] = (string) $item;
+            }
+        }
+        return $values;
+    }
+
+    /**
      * Discover columns from the actual database table + Eloquent casts.
      *
+     * @param array<string, string[]> $enumValues  Column name => possible values (from model methods)
      * @return ColumnSchema[]
      */
-    private function discoverColumns(Model $model, string $tableName): array
+    private function discoverColumns(Model $model, string $tableName, array $enumValues = []): array
     {
         $columns = [];
 
@@ -94,18 +174,46 @@ class EloquentSchemaDiscovery implements SchemaDiscoveryInterface
 
         foreach ($dbColumns as $dbCol) {
             $name = $dbCol['name'];
+            $colType = $this->mapColumnType($dbCol['type_name'], $casts[$name] ?? null);
+            
+            // Get enum values: first from model methods, then from DB if it's an enum column
+            $colEnumValues = $enumValues[$name] ?? [];
+            if (empty($colEnumValues) && $colType === ColumnType::ENUM) {
+                $colEnumValues = $this->extractDbEnumValues($dbCol['type'] ?? '');
+            }
+
+            // If we have enum values but type is string, upgrade to ENUM type
+            if (!empty($colEnumValues) && $colType === ColumnType::STRING) {
+                $colType = ColumnType::ENUM;
+            }
 
             $columns[] = new ColumnSchema(
                 name: $name,
-                type: $this->mapColumnType($dbCol['type_name'], $casts[$name] ?? null),
+                type: $colType,
                 nullable: $dbCol['nullable'] ?? false,
                 isPrimary: $name === $primaryKey,
                 default: $dbCol['default'] ?? null,
                 maxLength: $this->extractMaxLength($dbCol['type'] ?? ''),
+                enumValues: $colEnumValues,
             );
         }
 
         return $columns;
+    }
+
+    /**
+     * Extract enum values from database ENUM column definition
+     * e.g. "enum('active','inactive','pending')" → ['active', 'inactive', 'pending']
+     */
+    private function extractDbEnumValues(string $typeDefinition): array
+    {
+        if (!preg_match("/^enum\s*\((.+)\)$/i", $typeDefinition, $matches)) {
+            return [];
+        }
+        
+        // Parse the values from 'val1','val2','val3'
+        preg_match_all("/'([^']+)'/", $matches[1], $valueMatches);
+        return $valueMatches[1] ?? [];
     }
 
     /**

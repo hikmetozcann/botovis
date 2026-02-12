@@ -203,7 +203,16 @@ class Orchestrator
         $intent = $this->resolver->resolve($input, $conversation->getHistory());
 
         $conversation->addUserMessage($input);
-        $conversation->addAssistantMessage(json_encode($intent->toArray()));
+        
+        // Add assistant message to history (for context)
+        // For actions: brief summary; for questions: the actual response
+        if ($intent->isAction()) {
+            $conversation->addAssistantMessage(
+                "[{$intent->action->value}:{$intent->table}] {$intent->message}"
+            );
+        } else {
+            $conversation->addAssistantMessage($intent->message);
+        }
 
         // Non-action intents (question, clarification) are always allowed
         if (!$intent->isAction()) {

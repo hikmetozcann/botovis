@@ -613,7 +613,7 @@ export class BotovisChat extends HTMLElement {
     }
     return `
       <div class="bv-msg bv-msg-assistant">
-        <div class="bv-bubble">${this.esc(msg.content)}</div>
+        <div class="bv-bubble bv-bubble-md">${this.markdown(msg.content)}</div>
         <span class="bv-msg-time">${this.fmtTime(msg.timestamp)}</span>
       </div>`;
   }
@@ -1025,6 +1025,63 @@ export class BotovisChat extends HTMLElement {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  /**
+   * Render markdown in assistant messages.
+   * Supports: **bold**, *italic*, `code`, [link](url), headers, lists
+   */
+  private markdown(text: string): string {
+    if (!text) return '';
+    
+    // First escape HTML
+    let html = this.esc(text);
+    
+    // Code blocks (```code```)
+    html = html.replace(/```([\s\S]*?)```/g, '<pre class="bv-md-pre">$1</pre>');
+    
+    // Inline code (`code`)
+    html = html.replace(/`([^`]+)`/g, '<code class="bv-md-code">$1</code>');
+    
+    // Bold (**text** or __text__)
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    
+    // Italic (*text* or _text_)
+    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
+    
+    // Links [text](url)
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    
+    // Headers (# Header)
+    html = html.replace(/^### (.+)$/gm, '<h4 class="bv-md-h4">$1</h4>');
+    html = html.replace(/^## (.+)$/gm, '<h3 class="bv-md-h3">$1</h3>');
+    html = html.replace(/^# (.+)$/gm, '<h2 class="bv-md-h2">$1</h2>');
+    
+    // Bullet lists (- item or * item)
+    html = html.replace(/^[-*] (.+)$/gm, '<li class="bv-md-li">$1</li>');
+    // Wrap consecutive li elements in ul
+    html = html.replace(/(<li class="bv-md-li">.*<\/li>\n?)+/g, (match) => {
+      return '<ul class="bv-md-ul">' + match + '</ul>';
+    });
+    
+    // Numbered lists (1. item)
+    html = html.replace(/^\d+\. (.+)$/gm, '<li class="bv-md-oli">$1</li>');
+    html = html.replace(/(<li class="bv-md-oli">.*<\/li>\n?)+/g, (match) => {
+      return '<ol class="bv-md-ol">' + match + '</ol>';
+    });
+    
+    // Line breaks (double newline = paragraph)
+    html = html.replace(/\n\n/g, '</p><p>');
+    html = html.replace(/\n/g, '<br>');
+    
+    // Wrap in paragraph if not starting with block element
+    if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<ol') && !html.startsWith('<pre')) {
+      html = '<p>' + html + '</p>';
+    }
+    
+    return html;
   }
 
   private fmtTime(date: Date): string {
