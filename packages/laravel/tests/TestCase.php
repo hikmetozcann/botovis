@@ -1,8 +1,10 @@
 <?php
 
-namespace Botovis\Tests;
+declare(strict_types=1);
 
-use Botovis\BotovisServiceProvider;
+namespace Botovis\Laravel\Tests;
+
+use Botovis\Laravel\BotovisServiceProvider;
 use Orchestra\Testbench\TestCase as BaseTestCase;
 
 abstract class TestCase extends BaseTestCase
@@ -14,10 +16,12 @@ abstract class TestCase extends BaseTestCase
         ];
     }
 
-    protected function getPackageAliases($app): array
+    protected function defineEnvironment($app): void
     {
-        return [
-            'Botovis' => \Botovis\Facades\Botovis::class,
-        ];
+        $app['config']->set('database.default', 'testing');
+        $app['config']->set('database.connections.testing', [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+        ]);
     }
 }

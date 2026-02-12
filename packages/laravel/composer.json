@@ -1,45 +1,49 @@
 {
-    "name": "botovis/botovis",
-    "description": "Botovis SDK for Laravel",
-    "keywords": ["botovis", "laravel", "sdk"],
+    "name": "botovis/botovis-laravel",
+    "description": "Botovis Smart Layer for Laravel — AI-powered natural language interface for your app",
+    "keywords": ["botovis", "laravel", "ai", "smart-layer", "natural-language", "crud"],
     "license": "MIT",
     "type": "library",
     "require": {
         "php": "^8.1",
-        "illuminate/support": "^10.0|^11.0|^12.0"
+        "botovis/core": "^0.1",
+        "illuminate/support": "^10.0|^11.0|^12.0",
+        "illuminate/database": "^10.0|^11.0|^12.0",
+        "illuminate/console": "^10.0|^11.0|^12.0"
     },
     "require-dev": {
         "orchestra/testbench": "^8.0|^9.0|^10.0",
-        "phpunit/phpunit": "^10.0|^11.0",
-        "phpstan/phpstan": "^1.0"
+        "phpunit/phpunit": "^10.0|^11.0"
     },
     "autoload": {
         "psr-4": {
-            "Botovis\\": "src/"
+            "Botovis\\Laravel\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Botovis\\Tests\\": "tests/"
+            "Botovis\\Laravel\\Tests\\": "tests/"
         }
     },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../core"
+        }
+    ],
     "extra": {
         "laravel": {
             "providers": [
-                "Botovis\\BotovisServiceProvider"
-            ],
-            "aliases": {
-                "Botovis": "Botovis\\Facades\\Botovis"
-            }
+                "Botovis\\Laravel\\BotovisServiceProvider"
+            ]
         }
     },
-    "minimum-stability": "stable",
+    "minimum-stability": "dev",
     "prefer-stable": true,
     "config": {
         "sort-packages": true
     },
     "scripts": {
-        "test": "phpunit",
-        "analyse": "phpstan analyse src --level=8"
+        "test": "phpunit"
     }
 }

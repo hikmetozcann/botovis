@@ -1,6 +1,6 @@
 # Botovis for Laravel
 
-Official Botovis SDK for Laravel.
+Botovis Smart Layer for Laravel — AI-powered natural language interface for your existing app.
 
 ## Requirements
 
@@ -10,7 +10,7 @@ Official Botovis SDK for Laravel.
 ## Installation
 
 ```bash
-composer require botovis/botovis
+composer require botovis/botovis-laravel
 ```
 
 ## Configuration
@@ -21,36 +21,28 @@ Publish the config file:
 php artisan vendor:publish --tag=botovis-config
 ```
 
-Add to your `.env`:
-
-```env
-BOTOVIS_API_KEY=your-api-key
-BOTOVIS_ENV=production
-BOTOVIS_DEBUG=false
-```
-
-## Usage
-
-### Via Facade
+Then in `config/botovis.php`, whitelist your models:
 
 ```php
-use Botovis\Facades\Botovis;
-
-$version = Botovis::version();
+'models' => [
+    App\Models\Product::class => ['create', 'read', 'update', 'delete'],
+    App\Models\Category::class => ['read'],
+],
 ```
 
-### Via Dependency Injection
+## Schema Discovery
 
-```php
-use Botovis\Botovis;
+See what Botovis "sees" in your project:
 
-class MyController extends Controller
-{
-    public function index(Botovis $botovis)
-    {
-        $version = $botovis->version();
-    }
-}
+```bash
+# Pretty table output
+php artisan botovis:discover
+
+# JSON output
+php artisan botovis:discover --json
+
+# LLM prompt context
+php artisan botovis:discover --prompt
 ```
 
 ## Testing
