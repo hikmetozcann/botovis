@@ -24,8 +24,16 @@ final class AgentState
 
     public function __construct(
         public readonly string $userMessage,
-        public readonly int $maxSteps = 10,
+        public int $maxSteps = 10,
     ) {}
+
+    /**
+     * Extend max steps (e.g., after confirmation needs more room).
+     */
+    public function extendMaxSteps(int $extra): void
+    {
+        $this->maxSteps += $extra;
+    }
 
     /**
      * Add a step to the execution trace.
@@ -33,6 +41,19 @@ final class AgentState
     public function addStep(AgentStep $step): void
     {
         $this->steps[] = $step;
+    }
+
+    /**
+     * Replace the last step (e.g., to add observation after confirmation).
+     */
+    public function replaceLastStep(AgentStep $step): void
+    {
+        $idx = count($this->steps) - 1;
+        if ($idx >= 0) {
+            $this->steps[$idx] = $step;
+        } else {
+            $this->steps[] = $step;
+        }
     }
 
     /**
@@ -151,6 +172,14 @@ final class AgentState
     }
 
     /**
+     * Get error message (finalAnswer when status is failed).
+     */
+    public function getError(): ?string
+    {
+        return $this->status === self::STATUS_FAILED ? $this->finalAnswer : null;
+    }
+
+    /**
      * Build context for LLM from execution trace.
      */
     public function toPromptContext(): string
@@ -175,7 +204,13 @@ final class AgentState
             }
             
             if ($step->observation) {
-                $lines[] = "Observation: {$step->observation}";
+                // Check if this was a user-confirmed action
+                if (str_starts_with($step->observation, '[USER CONFIRMED] ')) {
+                    $lines[] = "User Confirmation: The user approved this action.";
+                    $lines[] = "Observation: " . substr($step->observation, strlen('[USER CONFIRMED] '));
+                } else {
+                    $lines[] = "Observation: {$step->observation}";
+                }
             }
         }
 

@@ -59,6 +59,14 @@ export const icons = {
 
   moon: `<svg ${s} width="15" height="15" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
 
+  chevronDown: `<svg ${s} width="14" height="14" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>`,
+
+  shield: `<svg ${s} width="16" height="16" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+
+  checkSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><polyline points="9 11 12 14 22 4"/></svg>`,
+
+  xSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>`,
+
   chevronRight: `<svg ${s} width="12" height="12" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`,
 
   // Botovis logo (horizontal) for header

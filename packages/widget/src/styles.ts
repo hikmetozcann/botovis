@@ -770,21 +770,150 @@ export const styles = /*css*/`
 /* ── Confirmation ─────────────────────────── */
 
 .bv-confirm-card {
-  background: var(--bv-warning-bg);
-  border: 1px solid var(--bv-warning);
+  background: var(--bv-bg-elevated);
+  border: 1px solid var(--bv-primary);
+  border-left: 3px solid var(--bv-primary);
   border-radius: var(--bv-radius-sm);
-  padding: 12px;
+  padding: 14px 16px;
   margin: 8px 0;
+  transition: all 0.2s ease;
+}
+
+.bv-confirm-card.bv-confirm-confirmed {
+  border-color: var(--bv-success);
+  border-left-color: var(--bv-success);
+  background: var(--bv-success-bg);
+}
+
+.bv-confirm-card.bv-confirm-rejected {
+  border-color: var(--bv-border);
+  border-left-color: var(--bv-text-muted);
+  background: var(--bv-surface);
+  opacity: 0.75;
+}
+
+.bv-confirm-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.bv-confirm-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bv-primary-light);
+  color: var(--bv-primary);
+  border-radius: 8px;
+}
+
+.bv-confirm-confirmed .bv-confirm-icon {
+  background: var(--bv-success-bg);
+  color: var(--bv-success);
+}
+
+.bv-confirm-rejected .bv-confirm-icon {
+  background: var(--bv-surface);
+  color: var(--bv-text-muted);
+}
+
+.bv-confirm-header-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .bv-confirm-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-weight: 600;
   font-size: 13px;
-  color: var(--bv-warning-text);
-  margin-bottom: 8px;
+  color: var(--bv-text);
+  line-height: 1.3;
+}
+
+.bv-confirm-action-label {
+  font-size: 12px;
+  color: var(--bv-text-secondary);
+  margin-top: 2px;
+}
+
+.bv-confirm-desc {
+  font-size: 13px;
+  color: var(--bv-text);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+/* Details toggle */
+.bv-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--bv-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-bottom: 4px;
+  font-family: inherit;
+  transition: color 0.15s;
+}
+
+.bv-detail-toggle:hover { color: var(--bv-primary); }
+
+.bv-detail-toggle svg {
+  transition: transform 0.2s ease;
+}
+
+.bv-detail-toggle.bv-open svg {
+  transform: rotate(180deg);
+}
+
+.bv-confirm-details {
+  display: none;
+  margin-bottom: 10px;
+}
+
+.bv-confirm-details.bv-open {
+  display: block;
+}
+
+.bv-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.bv-detail-table th {
+  text-align: left;
+  padding: 5px 8px;
+  font-weight: 500;
+  color: var(--bv-text-secondary);
+  background: var(--bv-surface);
+  border-bottom: 1px solid var(--bv-border);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.bv-detail-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--bv-border-light);
+  color: var(--bv-text);
+}
+
+.bv-detail-field {
+  font-weight: 500;
+  color: var(--bv-text-secondary);
+  white-space: nowrap;
+  width: 1%;
+}
+
+.bv-detail-value {
+  word-break: break-word;
 }
 
 .bv-confirm-actions {
@@ -793,25 +922,51 @@ export const styles = /*css*/`
   margin-top: 10px;
 }
 
+/* Status indicator (replaces buttons after confirm/reject) */
+.bv-confirm-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.bv-confirm-status-ok {
+  color: var(--bv-success-text);
+  background: var(--bv-success-bg);
+}
+
+.bv-confirm-status-rejected {
+  color: var(--bv-text-muted);
+  background: var(--bv-surface);
+}
+
 .bv-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 14px;
+  padding: 7px 16px;
   border: none;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.1s;
+  transition: all 0.15s;
   outline: none;
   font-family: inherit;
 }
 
 .bv-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.bv-btn-confirm { background: var(--bv-success); color: #fff; }
-.bv-btn-confirm:hover:not(:disabled) { filter: brightness(1.1); }
+.bv-btn-confirm {
+  background: var(--bv-primary);
+  color: var(--bv-primary-text);
+}
+.bv-btn-confirm:hover:not(:disabled) {
+  background: var(--bv-primary-hover);
+}
 
 .bv-btn-reject {
   background: var(--bv-bg);

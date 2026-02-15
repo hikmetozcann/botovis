@@ -36,6 +36,8 @@ export interface ChatMessage {
   result?: ActionResult | null;
   /** Snapshot of agent steps from streaming (for timeline rendering) */
   _steps?: Array<{step: number; thought: string; action?: string; observation?: string}>;
+  /** Tracks whether this confirmation was confirmed or rejected */
+  _confirmState?: 'confirmed' | 'rejected' | null;
 }
 
 export interface ResolvedIntent {

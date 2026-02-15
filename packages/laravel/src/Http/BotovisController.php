@@ -162,6 +162,7 @@ class BotovisController extends Controller
         ]);
 
         $conversationId = $request->input('conversation_id');
+        $startTime = microtime(true);
         
         if ($this->mode === 'agent') {
             $response = $this->agentOrchestrator->confirm($conversationId);
@@ -173,6 +174,26 @@ class BotovisController extends Controller
         } else {
             $response = $this->orchestrator->confirm($conversationId);
             $responseArray = $response->toArray();
+        }
+
+        // Save confirm action and result to conversation history
+        if ($this->conversationRepository) {
+            $executionTimeMs = (int) ((microtime(true) - $startTime) * 1000);
+
+            $this->conversationRepository->addMessage(Message::user(
+                Str::uuid()->toString(),
+                $conversationId,
+                'Evet, onayla',
+            ));
+
+            $this->conversationRepository->addMessage(Message::assistant(
+                Str::uuid()->toString(),
+                $conversationId,
+                $responseArray['message'] ?? 'İşlem onaylandı.',
+                intent: $responseArray['type'] ?? 'executed',
+                success: ($responseArray['type'] ?? '') !== 'error',
+                executionTimeMs: $executionTimeMs,
+            ));
         }
 
         return response()->json([
@@ -203,6 +224,23 @@ class BotovisController extends Controller
         } else {
             $response = $this->orchestrator->reject($conversationId);
             $responseArray = $response->toArray();
+        }
+
+        // Save reject action to conversation history
+        if ($this->conversationRepository) {
+            $this->conversationRepository->addMessage(Message::user(
+                Str::uuid()->toString(),
+                $conversationId,
+                'Hayır, iptal et',
+            ));
+
+            $this->conversationRepository->addMessage(Message::assistant(
+                Str::uuid()->toString(),
+                $conversationId,
+                $responseArray['message'] ?? 'İşlem iptal edildi.',
+                intent: 'rejected',
+                success: true,
+            ));
         }
 
         return response()->json([
@@ -400,6 +438,8 @@ class BotovisController extends Controller
             // Stream agent events
             $startTime = microtime(true);
             $finalMessage = null;
+            $isConfirmation = false;
+            $confirmDescription = null;
 
             foreach ($this->agentOrchestrator->stream($conversationId, $message) as $event) {
                 $this->emitSse($event->type, $event->data);
@@ -407,17 +447,32 @@ class BotovisController extends Controller
                 if ($event->type === StreamingEvent::TYPE_MESSAGE) {
                     $finalMessage = $event->data['content'] ?? '';
                 }
+                if ($event->type === StreamingEvent::TYPE_CONFIRMATION) {
+                    $isConfirmation = true;
+                    $confirmDescription = $event->data['description'] ?? '';
+                }
             }
 
             // Save assistant response after stream completes
-            if ($this->conversationRepository && $finalMessage !== null) {
+            if ($this->conversationRepository) {
                 $executionTimeMs = (int) ((microtime(true) - $startTime) * 1000);
-                $this->conversationRepository->addMessage(Message::assistant(
-                    Str::uuid()->toString(),
-                    $conversationId,
-                    $finalMessage,
-                    executionTimeMs: $executionTimeMs,
-                ));
+
+                if ($isConfirmation && $confirmDescription) {
+                    $this->conversationRepository->addMessage(Message::assistant(
+                        Str::uuid()->toString(),
+                        $conversationId,
+                        $confirmDescription,
+                        intent: 'confirmation',
+                        executionTimeMs: $executionTimeMs,
+                    ));
+                } elseif ($finalMessage !== null) {
+                    $this->conversationRepository->addMessage(Message::assistant(
+                        Str::uuid()->toString(),
+                        $conversationId,
+                        $finalMessage,
+                        executionTimeMs: $executionTimeMs,
+                    ));
+                }
             }
         });
     }
@@ -447,8 +502,51 @@ class BotovisController extends Controller
         }
 
         return $this->createSseResponse(function () use ($conversationId) {
+            $startTime = microtime(true);
+            $finalMessage = null;
+            $isConfirmation = false;
+            $confirmDescription = null;
+
             foreach ($this->agentOrchestrator->streamConfirm($conversationId) as $event) {
                 $this->emitSse($event->type, $event->data);
+
+                if ($event->type === StreamingEvent::TYPE_MESSAGE) {
+                    $finalMessage = $event->data['content'] ?? '';
+                }
+                if ($event->type === StreamingEvent::TYPE_CONFIRMATION) {
+                    $isConfirmation = true;
+                    $confirmDescription = $event->data['description'] ?? '';
+                }
+            }
+
+            // Save confirm action and result to conversation history
+            if ($this->conversationRepository) {
+                $executionTimeMs = (int) ((microtime(true) - $startTime) * 1000);
+
+                $this->conversationRepository->addMessage(Message::user(
+                    Str::uuid()->toString(),
+                    $conversationId,
+                    'Evet, onayla',
+                ));
+
+                if ($isConfirmation && $confirmDescription) {
+                    $this->conversationRepository->addMessage(Message::assistant(
+                        Str::uuid()->toString(),
+                        $conversationId,
+                        $confirmDescription,
+                        intent: 'confirmation',
+                        executionTimeMs: $executionTimeMs,
+                    ));
+                } elseif ($finalMessage !== null) {
+                    $this->conversationRepository->addMessage(Message::assistant(
+                        Str::uuid()->toString(),
+                        $conversationId,
+                        $finalMessage,
+                        intent: 'executed',
+                        success: true,
+                        executionTimeMs: $executionTimeMs,
+                    ));
+                }
             }
         });
     }

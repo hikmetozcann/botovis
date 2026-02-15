@@ -76,12 +76,12 @@ class DeleteRecordTool extends BaseTool
             }
 
             return ToolResult::ok(
-                "Deleted {$count} record(s) from '{$table}'.",
+                "'{$table}' tablosundan {$count} kay\u0131t silindi.",
                 ['deleted_ids' => $deletedIds],
                 ['count' => $count]
             );
         } catch (\Throwable $e) {
-            return ToolResult::fail("Failed to delete records: {$e->getMessage()}");
+            return ToolResult::fail($this->sanitizeError($e));
         }
     }
 }

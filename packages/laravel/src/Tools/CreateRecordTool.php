@@ -78,12 +78,12 @@ class CreateRecordTool extends BaseTool
             $model->save();
 
             return ToolResult::ok(
-                "Created new record in '{$table}' with ID: {$model->getKey()}",
+                "'{$table}' tablosuna yeni kay\u0131t eklendi. ID: {$model->getKey()}",
                 $model->toArray(),
                 ['id' => $model->getKey()]
             );
         } catch (\Throwable $e) {
-            return ToolResult::fail("Failed to create record: {$e->getMessage()}");
+            return ToolResult::fail($this->sanitizeError($e));
         }
     }
 }

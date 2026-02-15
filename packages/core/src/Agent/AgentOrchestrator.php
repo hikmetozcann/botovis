@@ -124,11 +124,16 @@ class AgentOrchestrator
             $state = $agentLoop->continueAfterConfirmation($state, $conversation->getHistory());
 
             $conversation->addUserMessage('Evet, onayla');
-            if ($state->getFinalAnswer()) {
-                $conversation->addAssistantMessage($state->getFinalAnswer());
-            }
 
-            $conversation->clearPendingAgentState();
+            if ($state->needsUserConfirmation()) {
+                // Agent needs another confirmation — keep pending state
+                $conversation->setPendingAgentState($state);
+            } else {
+                if ($state->getFinalAnswer()) {
+                    $conversation->addAssistantMessage($state->getFinalAnswer());
+                }
+                $conversation->clearPendingAgentState();
+            }
 
             return AgentResponse::fromState($state);
 
@@ -263,17 +268,29 @@ class AgentOrchestrator
                 yield $event;
             }
 
-            if ($state->getFinalAnswer()) {
+            if ($state->needsUserConfirmation()) {
+                // Agent needs another confirmation — yield it and keep pending state
+                $pending = $state->getPendingAction();
+                yield StreamingEvent::confirmation(
+                    $pending['action'],
+                    $pending['params'],
+                    $pending['description'],
+                );
+                $conversation->addUserMessage('Evet, onayla');
+                $conversation->setPendingAgentState($state);
+            } elseif ($state->getFinalAnswer()) {
                 yield StreamingEvent::message($state->getFinalAnswer());
+                $conversation->addUserMessage('Evet, onayla');
+                $conversation->addAssistantMessage($state->getFinalAnswer());
+                $conversation->clearPendingAgentState();
             } elseif ($state->getError()) {
                 yield StreamingEvent::error($state->getError());
+                $conversation->addUserMessage('Evet, onayla');
+                $conversation->clearPendingAgentState();
+            } else {
+                $conversation->addUserMessage('Evet, onayla');
+                $conversation->clearPendingAgentState();
             }
-
-            $conversation->addUserMessage('Evet, onayla');
-            if ($state->getFinalAnswer()) {
-                $conversation->addAssistantMessage($state->getFinalAnswer());
-            }
-            $conversation->clearPendingAgentState();
 
             yield StreamingEvent::done(
                 array_map(fn(AgentStep $s) => $s->toArray(), $state->getSteps()),

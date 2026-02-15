@@ -24,7 +24,7 @@ use Botovis\Core\Tools\ToolResult;
  */
 class AgentLoop
 {
-    private const DEFAULT_MAX_STEPS = 15;
+    private const DEFAULT_MAX_STEPS = 30;
 
     private ?SecurityContext $securityContext = null;
     
@@ -197,22 +197,44 @@ class AgentLoop
             return $state;
         }
 
+        // Extend max steps so the agent has room to finish after confirmation
+        $state->extendMaxSteps(5);
+
         // Execute the confirmed action
         $result = $this->tools->execute($pending['action'], $pending['params']);
+
+        \Log::info('[Botovis] continueAfterConfirmation', [
+            'action' => $pending['action'],
+            'success' => $result->success,
+            'message' => $result->message,
+            'steps_before' => count($state->getSteps()),
+            'maxSteps' => $state->maxSteps,
+        ]);
         
-        // Update the last step with observation
+        // Replace the last step (which had no observation) with observation
         $lastStep = $state->getLastStep();
         if ($lastStep) {
-            $updatedStep = $lastStep->withObservation($result->toObservation());
-            $state->addStep($updatedStep);
+            $prefix = $result->success ? '[CONFIRMED_SUCCESS]' : '[CONFIRMED_FAILED]';
+            $observation = $prefix . ' ' . $result->toObservation();
+            $updatedStep = $lastStep->withObservation($observation);
+            $state->replaceLastStep($updatedStep);
             $this->notifyStep($updatedStep, $state);
         }
 
         $state->clearPendingAction();
 
-        // Continue the loop
+        // Let the agent loop continue so the LLM can summarize in Turkish
         while ($state->isRunning() && !$state->isMaxStepsReached()) {
             $this->executeStep($state, $history);
+        }
+
+        // If max steps reached without LLM completing, auto-complete with result
+        if ($state->isRunning() && $state->isMaxStepsReached()) {
+            if ($result->success) {
+                $state->complete($result->message);
+            } else {
+                $state->fail($result->message);
+            }
         }
 
         return $state;
@@ -273,6 +295,8 @@ RULES:
 6. If the user asks for analysis or opinions, gather relevant data first, then provide insights.
 7. NEVER guess column names or values — always verify with tools first.
 8. Current step: {$state->getCurrentStepNumber()} of {$state->maxSteps} max steps.
+9. ALWAYS respond in Turkish. All your answers, thoughts, and explanations must be in Turkish.
+10. When you see [CONFIRMED_SUCCESS] or [CONFIRMED_FAILED] in an observation, it means the user confirmed a write operation and it was executed. You MUST immediately provide a final_answer in Turkish summarizing what happened. If successful, explain what was created/updated/deleted. If failed, explain the error clearly.
 
 IMPORTANT: Respond with ONLY the JSON object. No markdown code fences, no extra text.
 PROMPT;

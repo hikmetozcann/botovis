@@ -98,12 +98,12 @@ class UpdateRecordTool extends BaseTool
             }
 
             return ToolResult::ok(
-                "Updated {$count} record(s) in '{$table}'.",
+                "'{$table}' tablosunda {$count} kay\u0131t g\u00fcncellendi.",
                 $records->fresh()->toArray(),
                 ['count' => $count]
             );
         } catch (\Throwable $e) {
-            return ToolResult::fail("Failed to update records: {$e->getMessage()}");
+            return ToolResult::fail($this->sanitizeError($e));
         }
     }
 }

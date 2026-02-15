@@ -496,6 +496,15 @@ export class BotovisChat extends HTMLElement {
 
       if (action === 'confirm') this.handleConfirm();
       if (action === 'reject') this.handleReject();
+      if (action === 'toggle-details') {
+        const details = btn.closest('.bv-confirm-card')?.querySelector('.bv-confirm-details') as HTMLElement | null;
+        if (details) {
+          const isOpen = details.classList.toggle('bv-open');
+          const label = btn.querySelector('.bv-detail-label');
+          if (label) label.textContent = isOpen ? this.i('hideDetails') : this.i('details');
+          btn.classList.toggle('bv-open', isOpen);
+        }
+      }
       if (action === 'suggest') {
         const msg = btn.dataset.message;
         if (msg) this.send(msg);
@@ -659,8 +668,13 @@ export class BotovisChat extends HTMLElement {
     if (!this.conversationId || !this.hasPending) return;
     this.hasPending = false;
     this.disableConfirmButtons();
-    this.setLoading(true);
 
+    if (this.cfg.streaming) {
+      this.confirmWithStreaming();
+      return;
+    }
+
+    this.setLoading(true);
     try {
       const response = await this.api.confirm(this.conversationId);
       this.processResponse(response);
@@ -671,10 +685,77 @@ export class BotovisChat extends HTMLElement {
     }
   }
 
+  private confirmWithStreaming(): void {
+    this.streamingSteps = [];
+    this.currentStreamingMessageId = this.uid();
+
+    this.addMessage({
+      id: this.currentStreamingMessageId,
+      role: 'assistant',
+      type: 'loading',
+      content: '',
+      timestamp: new Date(),
+    });
+
+    this.isLoading = true;
+    const sendBtn = this.$('btn-send') as HTMLButtonElement | null;
+    if (sendBtn) sendBtn.disabled = true;
+
+    this.streamController = this.api.streamConfirm(
+      this.conversationId!,
+      {
+        onStep: (step) => {
+          this.streamingSteps.push({
+            step: step.step,
+            thought: step.thought,
+            action: step.action ?? undefined,
+            observation: step.observation ?? undefined,
+          });
+          this.updateStreamingStepsUI();
+        },
+
+        onConfirmation: (action, params, description) => {
+          this.hasPending = true;
+          this.finalizeStreamingMessage(description, 'confirmation', {
+            type: 'operation',
+            action,
+            table: params.table as string || null,
+            data: params,
+            where: {},
+            select: [],
+            message: description,
+            confidence: 1,
+            auto_continue: false,
+          });
+        },
+
+        onMessage: (content) => {
+          this.finalizeStreamingMessage(content, 'text');
+        },
+
+        onError: (error) => {
+          this.finalizeStreamingMessage(error.message, 'error');
+        },
+
+        onDone: () => {
+          this.isLoading = false;
+          if (sendBtn) sendBtn.disabled = false;
+          this.streamController = null;
+        },
+
+        onAbort: () => {
+          this.isLoading = false;
+          if (sendBtn) sendBtn.disabled = false;
+          this.streamController = null;
+        },
+      }
+    );
+  }
+
   private async handleReject(): Promise<void> {
     if (!this.conversationId || !this.hasPending) return;
     this.hasPending = false;
-    this.disableConfirmButtons();
+    this.disableConfirmButtons('rejected');
     this.setLoading(true);
 
     try {
@@ -829,9 +910,15 @@ export class BotovisChat extends HTMLElement {
     badge.classList.toggle('bv-visible', this.unreadCount > 0);
   }
 
-  private disableConfirmButtons(): void {
-    const btns = this.shadow.querySelectorAll('[data-action="confirm"], [data-action="reject"]');
-    btns.forEach(btn => (btn as HTMLButtonElement).disabled = true);
+  private disableConfirmButtons(state: 'confirmed' | 'rejected' = 'confirmed'): void {
+    // Persist the state in the message data so re-renders preserve it
+    const confirmMsg = this.messages.find(m => m.type === 'confirmation' && !m._confirmState);
+    if (confirmMsg) {
+      confirmMsg._confirmState = state;
+    }
+
+    // Re-render all messages so the correct card updates from data
+    this.renderMessages();
   }
 
   private scrollToBottom(): void {
@@ -935,22 +1022,107 @@ export class BotovisChat extends HTMLElement {
 
   private renderConfirmMsg(msg: ChatMessage): string {
     const intent = msg.intent;
-    if (!intent) return this.renderTextMsg(msg);
+    const desc = msg.content ? `<div class="bv-confirm-desc">${this.esc(msg.content)}</div>` : '';
+
+    // Build action label (user-friendly)
+    let actionLabel = this.i('confirmAction_default');
+    if (intent?.action) {
+      const key = `confirmAction_${intent.action.replace('_record', '')}`;
+      actionLabel = this.i(key) || this.i('confirmAction_default');
+    }
+
+    // Build details table (collapsible)
+    let detailsHtml = '';
+    if (intent) {
+      const rows: Array<[string, string]> = [];
+
+      // Show where conditions as readable fields
+      if (intent.where && Object.keys(intent.where).length > 0) {
+        for (const [k, v] of Object.entries(intent.where)) {
+          rows.push([this.friendlyFieldName(k), this.valStr(v)]);
+        }
+      }
+
+      // Show data fields (excluding 'table')
+      if (intent.data && Object.keys(intent.data).length > 0) {
+        for (const [k, v] of Object.entries(intent.data)) {
+          if (k === 'table' || k === 'where' || k === 'select') continue;
+          rows.push([this.friendlyFieldName(k), this.valStr(v)]);
+        }
+      }
+
+      if (rows.length > 0) {
+        const tableRows = rows.map(([field, val]) =>
+          `<tr><td class="bv-detail-field">${this.esc(field)}</td><td class="bv-detail-value">${this.esc(val)}</td></tr>`
+        ).join('');
+
+        detailsHtml = `
+          <button class="bv-detail-toggle" data-action="toggle-details">
+            ${icons.chevronDown}
+            <span class="bv-detail-label">${this.i('details')}</span>
+          </button>
+          <div class="bv-confirm-details">
+            <table class="bv-detail-table">
+              <thead><tr><th>${this.i('fieldName')}</th><th>${this.i('fieldValue')}</th></tr></thead>
+              <tbody>${tableRows}</tbody>
+            </table>
+          </div>`;
+      }
+    }
+
+    // Determine card state class and actions HTML based on _confirmState
+    const cState = msg._confirmState;
+    const cardStateClass = cState ? `bv-confirm-${cState}` : '';
+    let actionsHtml: string;
+
+    if (cState === 'confirmed') {
+      actionsHtml = `
+        <div class="bv-confirm-actions">
+          <div class="bv-confirm-status bv-confirm-status-ok">
+            ${icons.checkCircle}
+            <span>${this.i('confirmed')}</span>
+          </div>
+        </div>`;
+    } else if (cState === 'rejected') {
+      actionsHtml = `
+        <div class="bv-confirm-actions">
+          <div class="bv-confirm-status bv-confirm-status-rejected">
+            ${icons.xCircle}
+            <span>${this.i('rejected')}</span>
+          </div>
+        </div>`;
+    } else {
+      actionsHtml = `
+        <div class="bv-confirm-actions">
+          <button class="bv-btn bv-btn-confirm" data-action="confirm">${icons.check} ${this.i('confirm')}</button>
+          <button class="bv-btn bv-btn-reject" data-action="reject">${icons.x} ${this.i('reject')}</button>
+        </div>`;
+    }
 
     return `
       <div class="bv-msg bv-msg-assistant">
         ${this.msgHeader(msg)}
         <div class="bv-msg-body">
-          <div class="bv-confirm-card">
-            <div class="bv-confirm-title">${icons.alert} ${this.i('confirmQuestion')}</div>
-            ${this.renderIntentCard(intent)}
-            <div class="bv-confirm-actions">
-              <button class="bv-btn bv-btn-confirm" data-action="confirm">${icons.check} ${this.i('confirm')}</button>
-              <button class="bv-btn bv-btn-reject" data-action="reject">${icons.x} ${this.i('reject')}</button>
+          ${this.renderStepsTimeline(msg)}
+          <div class="bv-confirm-card ${cardStateClass}">
+            <div class="bv-confirm-header">
+              <div class="bv-confirm-icon">${icons.shield}</div>
+              <div class="bv-confirm-header-text">
+                <div class="bv-confirm-title">${this.i('confirmQuestion')}</div>
+                <div class="bv-confirm-action-label">${this.esc(actionLabel)}</div>
+              </div>
             </div>
+            ${desc}
+            ${detailsHtml}
+            ${actionsHtml}
           </div>
         </div>
       </div>`;
+  }
+
+  private friendlyFieldName(key: string): string {
+    // Convert snake_case to readable: first_name → First Name
+    return key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
 
   private renderExecutedMsg(msg: ChatMessage): string {
@@ -1240,13 +1412,30 @@ export class BotovisChat extends HTMLElement {
       const conv = response.conversation;
 
       this.conversationId = conv.id;
-      this.messages = conv.messages.map(m => ({
-        id: m.id,
-        role: m.role as 'user' | 'assistant',
-        type: m.role === 'user' ? 'text' as const : (m.success === false ? 'error' as const : 'text' as const),
-        content: m.content,
-        timestamp: new Date(m.created_at),
-      }));
+      this.messages = conv.messages.map(m => {
+        let type: ChatMessage['type'] = 'text';
+        if (m.role === 'user') {
+          type = 'text';
+        } else if (m.success === false) {
+          type = 'error';
+        } else if (m.intent === 'executed') {
+          type = 'executed';
+        } else if (m.intent === 'rejected') {
+          type = 'rejected';
+        } else if (m.intent === 'confirmation') {
+          type = 'text'; // Show as text in history (no longer actionable)
+        }
+
+        return {
+          id: m.id,
+          role: m.role as 'user' | 'assistant',
+          type,
+          content: m.content,
+          timestamp: new Date(m.created_at),
+          intent: m.action ? { table: m.table, action: m.action } as any : undefined,
+          result: m.intent === 'executed' ? { success: m.success !== false, message: m.content } : undefined,
+        } as ChatMessage;
+      });
 
       // Close history and render messages
       this.isHistoryOpen = false;
