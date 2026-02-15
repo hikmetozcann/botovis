@@ -31,7 +31,35 @@ class AgentOrchestrator
         private readonly ToolRegistry $tools,
         private readonly DatabaseSchema $schema,
         private readonly ConversationManagerInterface $conversationManager,
+        private readonly string $locale = 'en',
     ) {}
+
+    /**
+     * Locale-aware internal messages.
+     */
+    private const MESSAGES = [
+        'en' => [
+            'no_pending_confirm' => 'No pending operation to confirm.',
+            'no_pending_reject'  => 'No pending operation to reject.',
+            'user_confirmed'     => 'Yes, confirm',
+            'user_rejected'      => 'No, cancel',
+            'operation_cancelled' => 'Operation cancelled.',
+        ],
+        'tr' => [
+            'no_pending_confirm' => 'Onaylanacak bekleyen bir işlem yok.',
+            'no_pending_reject'  => 'Reddedilecek bekleyen bir işlem yok.',
+            'user_confirmed'     => 'Evet, onayla',
+            'user_rejected'      => 'Hayır, iptal et',
+            'operation_cancelled' => 'İşlem iptal edildi.',
+        ],
+    ];
+
+    private function msg(string $key): string
+    {
+        return self::MESSAGES[$this->locale][$key]
+            ?? self::MESSAGES['en'][$key]
+            ?? $key;
+    }
 
     /**
      * Set the authorizer for security checks.
@@ -77,7 +105,7 @@ class AgentOrchestrator
 
         try {
             // Create and run agent loop
-            $agentLoop = new AgentLoop($this->llm, $this->tools, $this->schema);
+            $agentLoop = new AgentLoop($this->llm, $this->tools, $this->schema, $this->locale);
             $agentLoop->setSecurityContext($this->getSecurityContext());
 
             $state = $agentLoop->run($userMessage, $conversation->getHistory(), self::MAX_STEPS);
@@ -114,16 +142,16 @@ class AgentOrchestrator
             $state = $conversation->getPendingAgentState();
 
             if (!$state || !$state->needsUserConfirmation()) {
-                return AgentResponse::error('Onaylanacak bekleyen bir işlem yok.');
+                return AgentResponse::error($this->msg('no_pending_confirm'));
             }
 
             // Create agent loop and continue after confirmation
-            $agentLoop = new AgentLoop($this->llm, $this->tools, $this->schema);
+            $agentLoop = new AgentLoop($this->llm, $this->tools, $this->schema, $this->locale);
             $agentLoop->setSecurityContext($this->getSecurityContext());
 
             $state = $agentLoop->continueAfterConfirmation($state, $conversation->getHistory());
 
-            $conversation->addUserMessage('Evet, onayla');
+            $conversation->addUserMessage($this->msg('user_confirmed'));
 
             if ($state->needsUserConfirmation()) {
                 // Agent needs another confirmation — keep pending state
@@ -151,14 +179,14 @@ class AgentOrchestrator
 
         try {
             if (!$conversation->getPendingAgentState()) {
-                return AgentResponse::error('Reddedilecek bekleyen bir işlem yok.');
+                return AgentResponse::error($this->msg('no_pending_reject'));
             }
 
             $conversation->clearPendingAgentState();
-            $conversation->addUserMessage('Hayır, iptal et');
-            $conversation->addAssistantMessage('İşlem iptal edildi.');
+            $conversation->addUserMessage($this->msg('user_rejected'));
+            $conversation->addAssistantMessage($this->msg('operation_cancelled'));
 
-            return AgentResponse::message('İşlem iptal edildi.');
+            return AgentResponse::message($this->msg('operation_cancelled'));
 
         } finally {
             $this->conversationManager->save($conversationId, $conversation);
@@ -186,7 +214,7 @@ class AgentOrchestrator
 
         try {
             // Create agent loop
-            $agentLoop = new AgentLoop($this->llm, $this->tools, $this->schema);
+            $agentLoop = new AgentLoop($this->llm, $this->tools, $this->schema, $this->locale);
             $agentLoop->setSecurityContext($this->getSecurityContext());
 
             // Run with streaming - yields each step as it completes
@@ -250,12 +278,12 @@ class AgentOrchestrator
             $state = $conversation->getPendingAgentState();
 
             if (!$state || !$state->needsUserConfirmation()) {
-                yield StreamingEvent::error('Onaylanacak bekleyen bir işlem yok.');
+                yield StreamingEvent::error($this->msg('no_pending_confirm'));
                 yield StreamingEvent::done();
                 return;
             }
 
-            $agentLoop = new AgentLoop($this->llm, $this->tools, $this->schema);
+            $agentLoop = new AgentLoop($this->llm, $this->tools, $this->schema, $this->locale);
             $agentLoop->setSecurityContext($this->getSecurityContext());
 
             $agentLoop->onStep(function (AgentStep $step, AgentState $state) use (&$events) {
@@ -276,19 +304,19 @@ class AgentOrchestrator
                     $pending['params'],
                     $pending['description'],
                 );
-                $conversation->addUserMessage('Evet, onayla');
+                $conversation->addUserMessage($this->msg('user_confirmed'));
                 $conversation->setPendingAgentState($state);
             } elseif ($state->getFinalAnswer()) {
                 yield StreamingEvent::message($state->getFinalAnswer());
-                $conversation->addUserMessage('Evet, onayla');
+                $conversation->addUserMessage($this->msg('user_confirmed'));
                 $conversation->addAssistantMessage($state->getFinalAnswer());
                 $conversation->clearPendingAgentState();
             } elseif ($state->getError()) {
                 yield StreamingEvent::error($state->getError());
-                $conversation->addUserMessage('Evet, onayla');
+                $conversation->addUserMessage($this->msg('user_confirmed'));
                 $conversation->clearPendingAgentState();
             } else {
-                $conversation->addUserMessage('Evet, onayla');
+                $conversation->addUserMessage($this->msg('user_confirmed'));
                 $conversation->clearPendingAgentState();
             }
 

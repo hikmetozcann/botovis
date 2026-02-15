@@ -20,6 +20,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Locale / Language
+    |--------------------------------------------------------------------------
+    |
+    | Controls the widget UI language (buttons, labels, placeholders)
+    | and internal system messages. The AI assistant automatically
+    | responds in the same language the user writes in.
+    |
+    | Supported: 'en' (English), 'tr' (Turkish)
+    |
+    */
+    'locale' => env('BOTOVIS_LOCALE', 'en'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Agent Configuration
     |--------------------------------------------------------------------------
     */

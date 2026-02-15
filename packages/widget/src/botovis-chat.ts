@@ -92,7 +92,7 @@ export class BotovisChat extends HTMLElement {
   get cfg(): BotovisConfig {
     return {
       endpoint: this.getAttribute('endpoint') || '/botovis',
-      lang: (this.getAttribute('lang') as Locale) || 'tr',
+      lang: (this.getAttribute('lang') as Locale) || 'en',
       theme: (this.getAttribute('theme') as 'light' | 'dark' | 'auto') || 'auto',
       position: (this.getAttribute('position') as 'bottom-right' | 'bottom-left') || 'bottom-right',
       title: this.getAttribute('title') || t('title', this.locale),
@@ -103,7 +103,7 @@ export class BotovisChat extends HTMLElement {
     };
   }
 
-  private get locale(): Locale { return (this.getAttribute('lang') as Locale) || 'tr'; }
+  private get locale(): Locale { return (this.getAttribute('lang') as Locale) || 'en'; }
 
   private i(key: string, params?: Record<string, string | number>): string {
     return t(key, this.locale, params);

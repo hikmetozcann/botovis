@@ -35,7 +35,34 @@ class AgentLoop
         private readonly LlmDriverInterface $llm,
         private readonly ToolRegistry $tools,
         private readonly DatabaseSchema $schema,
+        private readonly string $locale = 'en',
     ) {}
+
+    /**
+     * Map a locale code to its full language name for prompts.
+     */
+    private function getLanguageName(): string
+    {
+        $map = [
+            'en' => 'English',
+            'tr' => 'Turkish',
+            'fr' => 'French',
+            'de' => 'German',
+            'es' => 'Spanish',
+            'it' => 'Italian',
+            'pt' => 'Portuguese',
+            'ar' => 'Arabic',
+            'ja' => 'Japanese',
+            'ko' => 'Korean',
+            'zh' => 'Chinese',
+            'ru' => 'Russian',
+            'nl' => 'Dutch',
+            'pl' => 'Polish',
+            'sv' => 'Swedish',
+        ];
+
+        return $map[$this->locale] ?? $this->locale;
+    }
 
     /**
      * Set a callback to be called after each step completes.
@@ -295,8 +322,8 @@ RULES:
 6. If the user asks for analysis or opinions, gather relevant data first, then provide insights.
 7. NEVER guess column names or values — always verify with tools first.
 8. Current step: {$state->getCurrentStepNumber()} of {$state->maxSteps} max steps.
-9. ALWAYS respond in Turkish. All your answers, thoughts, and explanations must be in Turkish.
-10. When you see [CONFIRMED_SUCCESS] or [CONFIRMED_FAILED] in an observation, it means the user confirmed a write operation and it was executed. You MUST immediately provide a final_answer in Turkish summarizing what happened. If successful, explain what was created/updated/deleted. If failed, explain the error clearly.
+9. ALWAYS respond in the same language the user writes in. Match their language exactly.
+10. When you see [CONFIRMED_SUCCESS] or [CONFIRMED_FAILED] in an observation, it means the user confirmed a write operation and it was executed. You MUST immediately provide a final_answer summarizing what happened in the user's language. If successful, explain what was created/updated/deleted. If failed, explain the error clearly.
 
 IMPORTANT: Respond with ONLY the JSON object. No markdown code fences, no extra text.
 PROMPT;

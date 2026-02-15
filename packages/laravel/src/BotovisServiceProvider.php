@@ -133,6 +133,7 @@ class BotovisServiceProvider extends ServiceProvider
                 $app->make(ToolRegistry::class),
                 $schema,
                 $app->make(ConversationManagerInterface::class),
+                config('botovis.locale', 'en'),
             );
         });
     }
@@ -170,7 +171,7 @@ class BotovisServiceProvider extends ServiceProvider
 
         // ── Blade directive: @botovisWidget ──
         Blade::directive('botovisWidget', function ($expression) {
-            $defaults = "['endpoint' => '/' . config('botovis.route.prefix', 'botovis'), 'lang' => 'tr', 'theme' => 'auto', 'position' => 'bottom-right', 'streaming' => config('botovis.agent.streaming', true)]";
+            $defaults = "['endpoint' => '/' . config('botovis.route.prefix', 'botovis'), 'lang' => config('botovis.locale', 'en'), 'theme' => 'auto', 'position' => 'bottom-right', 'streaming' => config('botovis.agent.streaming', true)]";
             $merged = empty($expression) ? $defaults : "array_merge({$defaults}, {$expression})";
             return "<?php echo view('botovis::widget', {$merged})->render(); ?>";
         });
