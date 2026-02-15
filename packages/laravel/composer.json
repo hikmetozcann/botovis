@@ -25,6 +25,12 @@
             "Botovis\\Laravel\\Tests\\": "tests/"
         }
     },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../core"
+        }
+    ],
     "extra": {
         "laravel": {
             "providers": [
@@ -32,7 +38,7 @@
             ]
         }
     },
-    "minimum-stability": "stable",
+    "minimum-stability": "dev",
     "prefer-stable": true,
     "config": {
         "sort-packages": true
