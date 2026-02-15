@@ -493,14 +493,19 @@ export const styles = /*css*/`
 }
 
 .bv-msg-avatar {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 10px;
   font-weight: 700;
   flex-shrink: 0;
+}
+
+.bv-msg-avatar svg {
+  width: 14px;
+  height: 14px;
 }
 
 .bv-msg-user .bv-msg-avatar {
@@ -531,8 +536,61 @@ export const styles = /*css*/`
 
 .bv-msg:hover .bv-msg-time { opacity: 1; }
 
+/* ── Follow-up Messages (no header, connected) ── */
+
+.bv-msg-followup {
+  border-top: none !important;
+  padding-top: 0;
+}
+
+.bv-msg-followup .bv-msg-body {
+  padding-left: 30px;
+}
+
+/* ── Loading Indicator ────────────────────── */
+
+.bv-loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.bv-loading-pulse {
+  display: flex;
+  gap: 4px;
+}
+
+.bv-loading-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--bv-primary);
+  border-radius: 50%;
+  animation: bvLoadingPulse 1.4s infinite ease-in-out both;
+}
+
+.bv-loading-dot:nth-child(1) { animation-delay: -0.32s; }
+.bv-loading-dot:nth-child(2) { animation-delay: -0.16s; }
+.bv-loading-dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes bvLoadingPulse {
+  0%, 80%, 100% { transform: scale(0.4); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.bv-loading-text {
+  font-size: 13px;
+  color: var(--bv-text-muted);
+  animation: bvFadeInOut 2s infinite ease-in-out;
+}
+
+@keyframes bvFadeInOut {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 .bv-msg-body {
-  padding-left: 28px;
+  padding-left: 30px;
   font-size: 14px;
   color: var(--bv-text);
   line-height: 1.6;

@@ -263,7 +263,7 @@ export class BotovisChat extends HTMLElement {
       <div class="bv-thinking-line">
         <div class="bv-spinner"></div>
         <span class="bv-thinking-label">${this.escapeHtml(thinkingText)}</span>
-        ${completedCount > 0 ? `<span class="bv-thinking-count">${completedCount} araç</span>` : ''}
+        ${completedCount > 0 ? `<span class="bv-thinking-count">${this.i('toolsUsed', { count: completedCount })}</span>` : ''}
       </div>
       <div class="bv-timeline bv-visible">${timelineHtml}</div>
     `;
@@ -277,15 +277,16 @@ export class BotovisChat extends HTMLElement {
     const match = action.match(/^(\w+)/);
     if (match) {
       const name = match[1];
+      // Use readable names — these are tool display names, not UI strings
       const names: Record<string, string> = {
-        'search_records': 'arama',
-        'count_records': 'sayım',
-        'get_sample_data': 'veri çekme',
-        'get_column_stats': 'istatistik',
-        'aggregate': 'hesaplama',
-        'create_record': 'oluşturma',
-        'update_record': 'güncelleme',
-        'delete_record': 'silme',
+        'search_records': 'search',
+        'count_records': 'count',
+        'get_sample_data': 'sample data',
+        'get_column_stats': 'statistics',
+        'aggregate': 'aggregate',
+        'create_record': 'create',
+        'update_record': 'update',
+        'delete_record': 'delete',
       };
       return names[name] || name.replace(/_/g, ' ');
     }
@@ -423,7 +424,7 @@ export class BotovisChat extends HTMLElement {
       <div class="bv-history-item" data-action="select-conversation" data-id="${conv.id}">
         <div class="bv-history-item-content">
           <div class="bv-history-item-title">${this.esc(conv.title)}</div>
-          <div class="bv-history-item-meta">${this.formatDate(conv.updated_at)} · ${conv.message_count} mesaj</div>
+          <div class="bv-history-item-meta">${this.formatDate(conv.updated_at)} · ${this.i('messageCount', { count: conv.message_count })}</div>
         </div>
         <button class="bv-history-item-delete" data-action="delete-conversation" data-id="${conv.id}" title="${this.i('deleteConversation')}">
           ${icons.trash}
@@ -441,7 +442,7 @@ export class BotovisChat extends HTMLElement {
     if (days === 0) {
       return date.toLocaleTimeString(this.locale, { hour: '2-digit', minute: '2-digit' });
     } else if (days === 1) {
-      return this.locale === 'tr' ? 'Dün' : 'Yesterday';
+      return this.i('yesterday');
     } else if (days < 7) {
       return date.toLocaleDateString(this.locale, { weekday: 'short' });
     } else {
@@ -695,6 +696,7 @@ export class BotovisChat extends HTMLElement {
       type: 'loading',
       content: '',
       timestamp: new Date(),
+      _isFollowUp: true,
     });
 
     this.isLoading = true;
@@ -953,6 +955,7 @@ export class BotovisChat extends HTMLElement {
       case 'executed':     return this.renderExecutedMsg(msg);
       case 'rejected':     return this.renderRejectedMsg(msg);
       case 'error':        return this.renderErrorMsg(msg);
+      case 'loading':      return this.renderLoadingMsg(msg);
       case 'streaming':    return this.renderStreamingMsg(msg);
       default:             return this.renderTextMsg(msg);
     }
@@ -960,7 +963,7 @@ export class BotovisChat extends HTMLElement {
 
   private msgHeader(msg: ChatMessage): string {
     const isUser = msg.role === 'user';
-    const avatar = isUser ? 'S' : 'B';
+    const avatar = isUser ? icons.userIcon : icons.botAvatar;
     const name = isUser ? this.i('you') : this.i('assistant');
 
     return `
@@ -972,22 +975,46 @@ export class BotovisChat extends HTMLElement {
   }
 
   private renderStreamingMsg(msg: ChatMessage): string {
+    const followUpCls = msg._isFollowUp ? ' bv-msg-followup' : '';
     return `
-      <div class="bv-msg bv-msg-assistant">
-        ${this.msgHeader(msg)}
-        <div class="bv-msg-body">${msg.content}</div>
+      <div class="bv-msg bv-msg-assistant${followUpCls}">
+        ${msg._isFollowUp ? '' : this.msgHeader(msg)}
+        <div class="bv-msg-body${msg._isFollowUp ? '' : ''}">${msg.content}</div>
+      </div>`;
+  }
+
+  private renderLoadingMsg(msg: ChatMessage): string {
+    const followUpCls = msg._isFollowUp ? ' bv-msg-followup' : '';
+    return `
+      <div class="bv-msg bv-msg-assistant bv-msg-loading-state${followUpCls}">
+        ${msg._isFollowUp ? '' : `
+        <div class="bv-msg-header">
+          <div class="bv-msg-avatar">${icons.botAvatar}</div>
+          <span class="bv-msg-name">${this.i('assistant')}</span>
+        </div>`}
+        <div class="bv-msg-body">
+          <div class="bv-loading-indicator">
+            <div class="bv-loading-pulse">
+              <span class="bv-loading-dot"></span>
+              <span class="bv-loading-dot"></span>
+              <span class="bv-loading-dot"></span>
+            </div>
+            <span class="bv-loading-text">${this.i('thinking')}</span>
+          </div>
+        </div>
       </div>`;
   }
 
   private renderTextMsg(msg: ChatMessage): string {
     const cls = msg.role === 'user' ? 'bv-msg-user' : 'bv-msg-assistant';
+    const followUpCls = msg._isFollowUp ? ' bv-msg-followup' : '';
     const body = msg.role === 'user'
       ? this.esc(msg.content)
       : `<div class="bv-md">${this.renderStepsTimeline(msg)}${this.markdown(msg.content)}</div>`;
 
     return `
-      <div class="bv-msg ${cls}">
-        ${this.msgHeader(msg)}
+      <div class="bv-msg ${cls}${followUpCls}">
+        ${msg._isFollowUp ? '' : this.msgHeader(msg)}
         <div class="bv-msg-body">${body}</div>
       </div>`;
   }
@@ -1179,14 +1206,17 @@ export class BotovisChat extends HTMLElement {
     return `
       <div class="bv-msg bv-msg-assistant bv-msg-loading">
         <div class="bv-msg-header">
-          <div class="bv-msg-avatar">B</div>
+          <div class="bv-msg-avatar">${icons.botAvatar}</div>
           <span class="bv-msg-name">${this.i('assistant')}</span>
         </div>
         <div class="bv-msg-body">
-          <div class="bv-typing-dots">
-            <span class="bv-typing-dot"></span>
-            <span class="bv-typing-dot"></span>
-            <span class="bv-typing-dot"></span>
+          <div class="bv-loading-indicator">
+            <div class="bv-loading-pulse">
+              <span class="bv-loading-dot"></span>
+              <span class="bv-loading-dot"></span>
+              <span class="bv-loading-dot"></span>
+            </div>
+            <span class="bv-loading-text">${this.i('thinking')}</span>
           </div>
         </div>
       </div>`;
@@ -1326,14 +1356,14 @@ export class BotovisChat extends HTMLElement {
       if (tableActions.includes('read')) {
         actions.push({
           label: this.i('listAll', { table: tableName }),
-          message: `${tableName} listele`,
+          message: this.i('listAll', { table: tableName }),
           icon: icons.search,
         });
       }
       if (tableActions.includes('create') && actions.length < 6) {
         actions.push({
           label: this.i('addNew', { table: tableName }),
-          message: `Yeni ${tableName} ekle`,
+          message: this.i('addNew', { table: tableName }),
           icon: icons.plus,
         });
       }

@@ -22,6 +22,17 @@ final class AgentState
     private ?string $finalAnswer = null;
     private ?array $pendingAction = null;
 
+    /**
+     * Tool-calling conversation messages (normalized format).
+     * Used to maintain multi-turn context for native tool calling APIs.
+     *
+     * Format:
+     * - Tool call:   ['role' => 'assistant', 'content' => ?thought, 'tool_call' => ['id' => ..., 'name' => ..., 'params' => ...]]
+     * - Tool result:  ['role' => 'tool_result', 'tool_call_id' => ..., 'content' => ...]
+     * @var array
+     */
+    private array $toolMessages = [];
+
     public function __construct(
         public readonly string $userMessage,
         public int $maxSteps = 10,
@@ -108,16 +119,61 @@ final class AgentState
         $this->finalAnswer = $reason;
     }
 
+    // ──────────────────────────────────────────────
+    //  Tool Calling Messages (for native API)
+    // ──────────────────────────────────────────────
+
+    /**
+     * Add an assistant tool call message (LLM wants to invoke a tool).
+     */
+    public function addToolCallMessage(string $toolCallId, string $toolName, array $params, ?string $thought = null): void
+    {
+        $this->toolMessages[] = [
+            'role' => 'assistant',
+            'content' => $thought,
+            'tool_call' => [
+                'id' => $toolCallId,
+                'name' => $toolName,
+                'params' => $params,
+            ],
+        ];
+    }
+
+    /**
+     * Add a tool result message (result of executing a tool).
+     */
+    public function addToolResultMessage(string $toolCallId, string $content): void
+    {
+        $this->toolMessages[] = [
+            'role' => 'tool_result',
+            'tool_call_id' => $toolCallId,
+            'content' => $content,
+        ];
+    }
+
+    /**
+     * Get all tool messages for the multi-turn conversation.
+     */
+    public function getToolMessages(): array
+    {
+        return $this->toolMessages;
+    }
+
+    // ──────────────────────────────────────────────
+    //  Confirmation
+    // ──────────────────────────────────────────────
+
     /**
      * Mark as needing confirmation for a write action.
      */
-    public function needsConfirmation(string $action, array $params, string $description): void
+    public function needsConfirmation(string $action, array $params, string $description, ?string $toolCallId = null): void
     {
         $this->status = self::STATUS_NEEDS_CONFIRMATION;
         $this->pendingAction = [
             'action' => $action,
             'params' => $params,
             'description' => $description,
+            'tool_call_id' => $toolCallId,
         ];
     }
 

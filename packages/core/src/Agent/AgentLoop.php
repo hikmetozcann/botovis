@@ -5,22 +5,23 @@ declare(strict_types=1);
 namespace Botovis\Core\Agent;
 
 use Botovis\Core\Contracts\LlmDriverInterface;
+use Botovis\Core\DTO\LlmResponse;
 use Botovis\Core\DTO\SecurityContext;
 use Botovis\Core\Schema\DatabaseSchema;
 use Botovis\Core\Tools\ToolRegistry;
 use Botovis\Core\Tools\ToolResult;
 
 /**
- * The Agent Loop — implements ReAct (Reasoning + Acting) pattern.
+ * The Agent Loop — implements ReAct (Reasoning + Acting) pattern
+ * using native LLM tool calling APIs.
  *
  * Flow:
  * 1. User sends message
- * 2. Agent thinks about what to do (Thought)
- * 3. Agent decides to use a tool (Action)
- * 4. Tool executes and returns result (Observation)
- * 5. Agent thinks again with new info
- * 6. Repeat until agent has enough info to answer
- * 7. Return final answer (or ask for confirmation)
+ * 2. LLM decides to call a tool (via native tool calling API)
+ * 3. Tool executes and returns result
+ * 4. Result is sent back to LLM as tool_result message
+ * 5. LLM thinks again with new info
+ * 6. Repeat until LLM responds with text (final answer) or asks for confirmation
  */
 class AgentLoop
 {
@@ -37,32 +38,6 @@ class AgentLoop
         private readonly DatabaseSchema $schema,
         private readonly string $locale = 'en',
     ) {}
-
-    /**
-     * Map a locale code to its full language name for prompts.
-     */
-    private function getLanguageName(): string
-    {
-        $map = [
-            'en' => 'English',
-            'tr' => 'Turkish',
-            'fr' => 'French',
-            'de' => 'German',
-            'es' => 'Spanish',
-            'it' => 'Italian',
-            'pt' => 'Portuguese',
-            'ar' => 'Arabic',
-            'ja' => 'Japanese',
-            'ko' => 'Korean',
-            'zh' => 'Chinese',
-            'ru' => 'Russian',
-            'nl' => 'Dutch',
-            'pl' => 'Polish',
-            'sv' => 'Swedish',
-        ];
-
-        return $map[$this->locale] ?? $this->locale;
-    }
 
     /**
      * Set a callback to be called after each step completes.
@@ -98,9 +73,8 @@ class AgentLoop
             $this->executeStep($state, $history);
         }
 
-        // If max steps reached without completion, fail gracefully
         if ($state->isRunning() && $state->isMaxStepsReached()) {
-            $state->fail("Maksimum adım sayısına ulaşıldı. Lütfen sorunuzu daha spesifik hale getirin.");
+            $state->fail("Max steps reached. Please make your question more specific.");
         }
 
         return $state;
@@ -109,9 +83,6 @@ class AgentLoop
     /**
      * Run agent loop with streaming - yields each step as it completes.
      *
-     * @param string $userMessage
-     * @param array  $history
-     * @param int    $maxSteps
      * @return \Generator<AgentStep|AgentState> Yields AgentSteps during execution, returns final AgentState
      */
     public function runStreaming(string $userMessage, array $history = [], int $maxSteps = self::DEFAULT_MAX_STEPS): \Generator
@@ -125,9 +96,8 @@ class AgentLoop
             }
         }
 
-        // If max steps reached without completion, fail gracefully
         if ($state->isRunning() && $state->isMaxStepsReached()) {
-            $state->fail("Maksimum adım sayısına ulaşıldı. Lütfen sorunuzu daha spesifik hale getirin.");
+            $state->fail("Max steps reached. Please make your question more specific.");
         }
 
         return $state;
@@ -142,65 +112,75 @@ class AgentLoop
     }
 
     /**
-     * Execute a single reasoning step and return the step (for streaming).
+     * Execute a single reasoning step using native tool calling.
+     *
+     * Instead of parsing raw JSON from the LLM, we use the provider's
+     * native tool calling API which returns structured LlmResponse objects.
      */
     private function executeStepAndReturn(AgentState $state, array $history): ?AgentStep
     {
         $systemPrompt = $this->buildSystemPrompt($state);
-        
-        $messages = array_merge($history, [
-            ['role' => 'user', 'content' => $state->userMessage],
-        ]);
+        $toolDefs = $this->tools->toFunctionDefinitions();
 
-        // Add previous reasoning steps as assistant context
-        $traceContext = $state->toPromptContext();
-        if ($traceContext) {
-            $messages[] = ['role' => 'assistant', 'content' => $traceContext];
-            $messages[] = ['role' => 'user', 'content' => 'Continue your reasoning. What is your next thought and action?'];
-        }
+        // Build messages: conversation history + user message + tool calling messages
+        $messages = array_merge(
+            $history,
+            [['role' => 'user', 'content' => $state->userMessage]],
+            $state->getToolMessages(),
+        );
 
-        $response = $this->llm->chat($systemPrompt, $messages);
-        $parsed = $this->parseAgentResponse($response);
+        $response = $this->llm->chatWithTools($systemPrompt, $messages, $toolDefs);
 
-        if ($parsed['type'] === 'final_answer') {
-            $state->complete($parsed['answer']);
+        // Text response = final answer
+        if ($response->isText()) {
+            $state->complete($response->text);
             return null;
         }
 
-        if ($parsed['type'] === 'action') {
+        // Tool call response
+        if ($response->isToolCall()) {
             $step = AgentStep::action(
                 $state->getCurrentStepNumber(),
-                $parsed['thought'],
-                $parsed['action'],
-                $parsed['params'],
+                $response->thought ?? '',
+                $response->toolName,
+                $response->toolParams,
+            );
+
+            // Add tool call to conversation messages
+            $state->addToolCallMessage(
+                $response->toolCallId,
+                $response->toolName,
+                $response->toolParams,
+                $response->thought,
             );
 
             // Check if action needs confirmation (write operations)
-            $tool = $this->tools->get($parsed['action']);
+            $tool = $this->tools->get($response->toolName);
             if ($tool && $tool->requiresConfirmation()) {
                 $state->addStep($step);
                 $this->notifyStep($step, $state);
                 $state->needsConfirmation(
-                    $parsed['action'],
-                    $parsed['params'],
-                    $parsed['thought'],
+                    $response->toolName,
+                    $response->toolParams,
+                    $response->thought ?? '',
+                    $response->toolCallId,
                 );
                 return $step;
             }
 
             // Execute the tool
-            $result = $this->tools->execute($parsed['action'], $parsed['params']);
+            $result = $this->tools->execute($response->toolName, $response->toolParams);
+
+            // Add tool result to conversation messages
+            $state->addToolResultMessage($response->toolCallId, $result->toObservation());
+
             $step = $step->withObservation($result->toObservation());
             $state->addStep($step);
             $this->notifyStep($step, $state);
             return $step;
         }
 
-        // Unknown response — treat as thought only
-        $step = AgentStep::thought($state->getCurrentStepNumber(), $parsed['thought'] ?? $response);
-        $state->addStep($step);
-        $this->notifyStep($step, $state);
-        return $step;
+        return null;
     }
 
     /**
@@ -220,7 +200,7 @@ class AgentLoop
     {
         $pending = $state->getPendingAction();
         if (!$pending) {
-            $state->fail("Onaylanacak bekleyen işlem yok.");
+            $state->fail("No pending operation to confirm.");
             return $state;
         }
 
@@ -237,12 +217,17 @@ class AgentLoop
             'steps_before' => count($state->getSteps()),
             'maxSteps' => $state->maxSteps,
         ]);
+
+        // Add tool result to conversation messages
+        $toolCallId = $pending['tool_call_id'] ?? ('confirmed_' . uniqid());
+        $prefix = $result->success ? '[CONFIRMED_SUCCESS]' : '[CONFIRMED_FAILED]';
+        $observation = $prefix . ' ' . $result->toObservation();
+
+        $state->addToolResultMessage($toolCallId, $observation);
         
         // Replace the last step (which had no observation) with observation
         $lastStep = $state->getLastStep();
         if ($lastStep) {
-            $prefix = $result->success ? '[CONFIRMED_SUCCESS]' : '[CONFIRMED_FAILED]';
-            $observation = $prefix . ' ' . $result->toObservation();
             $updatedStep = $lastStep->withObservation($observation);
             $state->replaceLastStep($updatedStep);
             $this->notifyStep($updatedStep, $state);
@@ -250,7 +235,7 @@ class AgentLoop
 
         $state->clearPendingAction();
 
-        // Let the agent loop continue so the LLM can summarize in Turkish
+        // Let the agent loop continue so the LLM can summarize
         while ($state->isRunning() && !$state->isMaxStepsReached()) {
             $this->executeStep($state, $history);
         }
@@ -268,64 +253,36 @@ class AgentLoop
     }
 
     /**
-     * Build system prompt with tools and schema context.
+     * Build system prompt.
+     *
+     * Tools are NOT described here — they're passed via the native tool calling API.
+     * This prompt focuses on behavior, rules, and database schema context.
      */
     private function buildSystemPrompt(AgentState $state): string
     {
         $schemaContext = $this->schema->toPromptContext();
-        $toolsContext = $this->tools->toPromptContext();
         $userContext = $this->buildUserContext();
 
         return <<<PROMPT
 You are Botovis, an intelligent AI agent that helps users interact with their database through natural language.
 
-You follow the ReAct (Reasoning + Acting) pattern:
-1. **Think** about what the user wants and what information you need
-2. **Act** by using available tools to gather data or perform operations
-3. **Observe** the results and think again
-4. Repeat until you can provide a complete answer
+You have access to tools that let you search, count, aggregate, and modify database records. Use them to gather information before answering.
 
 {$userContext}
 
 {$schemaContext}
-
-{$toolsContext}
-
-RESPONSE FORMAT:
-Always respond with valid JSON in one of these formats:
-
-**When you need to use a tool:**
-```json
-{
-  "type": "action",
-  "thought": "Your reasoning about why you need this tool",
-  "action": "tool_name",
-  "params": {"param1": "value1"}
-}
-```
-
-**When you have enough information to answer:**
-```json
-{
-  "type": "final_answer",
-  "thought": "Your final reasoning",
-  "answer": "Your complete answer to the user. Use markdown for formatting."
-}
-```
 
 RULES:
 1. Always think step by step. Don't try to answer without gathering necessary data first.
 2. Use tools to explore and understand the data before making conclusions.
 3. If you're unsure about something, use a tool to verify (e.g., get_sample_data to see actual data).
 4. For write operations (create_record, update_record, delete_record), always explain what will change.
-5. Be concise but complete in your final answers.
+5. Be concise but complete in your final answers. Use markdown for formatting tables and lists.
 6. If the user asks for analysis or opinions, gather relevant data first, then provide insights.
 7. NEVER guess column names or values — always verify with tools first.
 8. Current step: {$state->getCurrentStepNumber()} of {$state->maxSteps} max steps.
 9. ALWAYS respond in the same language the user writes in. Match their language exactly.
-10. When you see [CONFIRMED_SUCCESS] or [CONFIRMED_FAILED] in an observation, it means the user confirmed a write operation and it was executed. You MUST immediately provide a final_answer summarizing what happened in the user's language. If successful, explain what was created/updated/deleted. If failed, explain the error clearly.
-
-IMPORTANT: Respond with ONLY the JSON object. No markdown code fences, no extra text.
+10. When you see [CONFIRMED_SUCCESS] or [CONFIRMED_FAILED] in a tool result, it means the user confirmed a write operation and it was executed. Provide a clear summary of what happened.
 PROMPT;
     }
 
@@ -354,29 +311,5 @@ PROMPT;
         }
 
         return implode("\n", $lines);
-    }
-
-    /**
-     * Parse the agent's JSON response.
-     */
-    private function parseAgentResponse(string $response): array
-    {
-        // Strip markdown code fences
-        $response = trim($response);
-        $response = preg_replace('/^```(?:json)?\s*/i', '', $response);
-        $response = preg_replace('/\s*```$/i', '', $response);
-        $response = trim($response);
-
-        $parsed = json_decode($response, true);
-
-        if ($parsed === null) {
-            // Couldn't parse — treat as thought
-            return [
-                'type' => 'thought',
-                'thought' => $response,
-            ];
-        }
-
-        return $parsed;
     }
 }

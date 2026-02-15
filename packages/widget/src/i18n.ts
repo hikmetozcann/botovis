@@ -69,6 +69,8 @@ const translations: Record<Locale, Record<string, string>> = {
     confirmAction_default: 'Veritabanı işlemi',
     fieldName: 'Alan',
     fieldValue: 'Değer',
+    messageCount: '{count} mesaj',
+    yesterday: 'Dün',
   },
   en: {
     title: 'Botovis Assistant',
@@ -134,6 +136,8 @@ const translations: Record<Locale, Record<string, string>> = {
     confirmAction_default: 'Database operation',
     fieldName: 'Field',
     fieldValue: 'Value',
+    messageCount: '{count} messages',
+    yesterday: 'Yesterday',
   },
 };
 

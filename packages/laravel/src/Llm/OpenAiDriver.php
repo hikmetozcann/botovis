@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Botovis\Laravel\Llm;
 
 use Botovis\Core\Contracts\LlmDriverInterface;
+use Botovis\Core\DTO\LlmResponse;
 
 /**
  * OpenAI LLM Driver.
  *
  * Communicates with OpenAI API (or any OpenAI-compatible endpoint).
- * Uses plain cURL — no external HTTP client dependency needed.
+ * Supports native tool/function calling.
  */
 class OpenAiDriver implements LlmDriverInterface
 {
@@ -40,6 +41,81 @@ class OpenAiDriver implements LlmDriverInterface
         $response = $this->request('/chat/completions', $payload);
 
         return $response['choices'][0]['message']['content'] ?? '';
+    }
+
+    /**
+     * Chat with native tool calling support.
+     *
+     * OpenAI tool calling flow:
+     * 1. Send request with `tools` array → LLM responds with `tool_calls` in message
+     * 2. Send `tool` role messages back → LLM continues reasoning
+     */
+    public function chatWithTools(string $systemPrompt, array $messages, array $tools): LlmResponse
+    {
+        $openaiMessages = $this->convertMessages($messages);
+
+        $payload = [
+            'model'       => $this->model,
+            'messages'    => array_merge(
+                [['role' => 'system', 'content' => $systemPrompt]],
+                $openaiMessages,
+            ),
+            'tools'       => $tools,
+            'temperature' => 0.1,
+            'max_tokens'  => 2048,
+        ];
+
+        $response = $this->request('/chat/completions', $payload);
+
+        return $this->parseLlmResponse($response);
+    }
+
+    /**
+     * Convert normalized tool messages to OpenAI API format.
+     *
+     * Normalized (from AgentState):
+     *   assistant + tool_call → OpenAI assistant with tool_calls array
+     *   tool_result           → OpenAI tool role message
+     *
+     * Standard messages pass through unchanged.
+     */
+    private function convertMessages(array $messages): array
+    {
+        $result = [];
+
+        foreach ($messages as $msg) {
+            if (isset($msg['tool_call'])) {
+                // Assistant tool call → OpenAI format
+                $result[] = [
+                    'role'       => 'assistant',
+                    'content'    => $msg['content'] ?? null,
+                    'tool_calls' => [
+                        [
+                            'id'       => $msg['tool_call']['id'],
+                            'type'     => 'function',
+                            'function' => [
+                                'name'      => $msg['tool_call']['name'],
+                                'arguments' => json_encode($msg['tool_call']['params'], JSON_UNESCAPED_UNICODE),
+                            ],
+                        ],
+                    ],
+                ];
+
+            } elseif (($msg['role'] ?? '') === 'tool_result') {
+                // Tool result → OpenAI tool message
+                $result[] = [
+                    'role'         => 'tool',
+                    'tool_call_id' => $msg['tool_call_id'],
+                    'content'      => $msg['content'],
+                ];
+
+            } else {
+                // Standard message — pass through
+                $result[] = $msg;
+            }
+        }
+
+        return $result;
     }
 
     public function stream(string $systemPrompt, array $messages, callable $onToken): string
@@ -148,5 +224,33 @@ class OpenAiDriver implements LlmDriverInterface
         }
 
         return $fullResponse;
+    }
+
+    /**
+     * Parse OpenAI response into structured LlmResponse.
+     *
+     * OpenAI returns:
+     * - `tool_calls` array in the message → LlmResponse::toolCall (first call)
+     * - `content` field → LlmResponse::text
+     */
+    private function parseLlmResponse(array $response): LlmResponse
+    {
+        $message = $response['choices'][0]['message'] ?? [];
+        $toolCalls = $message['tool_calls'] ?? [];
+        $content = $message['content'] ?? null;
+
+        if (!empty($toolCalls)) {
+            $call = $toolCalls[0]; // Take the first tool call
+            $params = json_decode($call['function']['arguments'] ?? '{}', true) ?? [];
+
+            return LlmResponse::toolCall(
+                toolName: $call['function']['name'],
+                toolParams: $params,
+                toolCallId: $call['id'],
+                thought: $content, // OpenAI can include text alongside tool calls
+            );
+        }
+
+        return LlmResponse::text($content ?? '');
     }
 }

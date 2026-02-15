@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Botovis\Laravel\Llm;
 
 use Botovis\Core\Contracts\LlmDriverInterface;
+use Botovis\Core\DTO\LlmResponse;
 
 /**
  * Anthropic (Claude) LLM Driver.
+ *
+ * Supports native tool calling via Anthropic's tool_use API.
  */
 class AnthropicDriver implements LlmDriverInterface
 {
@@ -35,6 +38,33 @@ class AnthropicDriver implements LlmDriverInterface
         return $response['content'][0]['text'] ?? '';
     }
 
+    /**
+     * Chat with native tool calling support.
+     *
+     * Anthropic tool use flow:
+     * 1. Send request with `tools` array → LLM responds with `tool_use` content block
+     * 2. Send `tool_result` messages back → LLM continues reasoning
+     *
+     * @param array $tools OpenAI-format tool defs — automatically converted to Anthropic format
+     */
+    public function chatWithTools(string $systemPrompt, array $messages, array $tools): LlmResponse
+    {
+        $anthropicTools = $this->convertToolDefinitions($tools);
+        $anthropicMessages = $this->convertMessages($messages);
+
+        $payload = [
+            'model'      => $this->model,
+            'max_tokens' => 2048,
+            'system'     => $systemPrompt,
+            'messages'   => $anthropicMessages,
+            'tools'      => $anthropicTools,
+        ];
+
+        $response = $this->request($payload);
+
+        return $this->parseLlmResponse($response);
+    }
+
     public function stream(string $systemPrompt, array $messages, callable $onToken): string
     {
         $payload = [
@@ -46,6 +76,113 @@ class AnthropicDriver implements LlmDriverInterface
         ];
 
         return $this->requestStream($payload, $onToken);
+    }
+
+    /**
+     * Convert OpenAI-format tool definitions to Anthropic format.
+     *
+     * OpenAI: [{ type: "function", function: { name, description, parameters } }]
+     * Anthropic: [{ name, description, input_schema }]
+     */
+    private function convertToolDefinitions(array $tools): array
+    {
+        return array_map(function (array $tool) {
+            $fn = $tool['function'] ?? $tool;
+            return [
+                'name'         => $fn['name'],
+                'description'  => $fn['description'] ?? '',
+                'input_schema' => $fn['parameters'] ?? ['type' => 'object', 'properties' => new \stdClass()],
+            ];
+        }, $tools);
+    }
+
+    /**
+     * Convert normalized tool messages to Anthropic API format.
+     *
+     * Normalized (from AgentState):
+     *   assistant + tool_call → Anthropic assistant with content blocks [text, tool_use]
+     *   tool_result           → Anthropic user with content block [tool_result]
+     *
+     * Standard messages (user/assistant with string content) pass through unchanged.
+     */
+    private function convertMessages(array $messages): array
+    {
+        $result = [];
+
+        foreach ($messages as $msg) {
+            if (isset($msg['tool_call'])) {
+                // Assistant tool call → Anthropic content blocks
+                $content = [];
+                if (!empty($msg['content'])) {
+                    $content[] = ['type' => 'text', 'text' => $msg['content']];
+                }
+                $content[] = [
+                    'type'  => 'tool_use',
+                    'id'    => $msg['tool_call']['id'],
+                    'name'  => $msg['tool_call']['name'],
+                    'input' => !empty($msg['tool_call']['params']) ? $msg['tool_call']['params'] : new \stdClass(),
+                ];
+                $result[] = ['role' => 'assistant', 'content' => $content];
+
+            } elseif (($msg['role'] ?? '') === 'tool_result') {
+                // Tool result → Anthropic user message with tool_result block
+                $result[] = [
+                    'role'    => 'user',
+                    'content' => [
+                        [
+                            'type'        => 'tool_result',
+                            'tool_use_id' => $msg['tool_call_id'],
+                            'content'     => $msg['content'],
+                        ],
+                    ],
+                ];
+
+            } else {
+                // Standard user/assistant message — pass through
+                $result[] = $msg;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Parse Anthropic API response into structured LlmResponse.
+     *
+     * Anthropic returns content blocks. We look for:
+     * - `tool_use` block → LlmResponse::toolCall
+     * - `text` block → LlmResponse::text
+     *
+     * When both exist (thinking + tool call), the text becomes the "thought".
+     */
+    private function parseLlmResponse(array $response): LlmResponse
+    {
+        $content = $response['content'] ?? [];
+        $textParts = [];
+        $toolCall = null;
+
+        foreach ($content as $block) {
+            if ($block['type'] === 'text') {
+                $textParts[] = $block['text'];
+            } elseif ($block['type'] === 'tool_use') {
+                $toolCall = $block;
+            }
+        }
+
+        $thought = !empty($textParts) ? implode("\n", $textParts) : null;
+
+        // If there's a tool call, return it (with optional thought)
+        if ($toolCall) {
+            return LlmResponse::toolCall(
+                toolName: $toolCall['name'],
+                toolParams: $toolCall['input'] ?? [],
+                toolCallId: $toolCall['id'],
+                thought: $thought,
+            );
+        }
+
+        // Text-only response (final answer)
+        return LlmResponse::text($thought ?? '');
     }
 
     private function request(array $payload): array

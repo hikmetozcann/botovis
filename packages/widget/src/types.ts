@@ -38,6 +38,8 @@ export interface ChatMessage {
   _steps?: Array<{step: number; thought: string; action?: string; observation?: string}>;
   /** Tracks whether this confirmation was confirmed or rejected */
   _confirmState?: 'confirmed' | 'rejected' | null;
+  /** Marks this as a follow-up message (e.g. after confirmation) — no header shown */
+  _isFollowUp?: boolean;
 }
 
 export interface ResolvedIntent {
