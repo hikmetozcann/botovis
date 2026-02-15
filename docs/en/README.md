@@ -1,6 +1,8 @@
 # Botovis Documentation
 
-Complete documentation for the Botovis Laravel package.
+Complete documentation for Botovis — AI-powered natural language database assistant.
+
+> **Note:** The guides below currently cover the **Laravel integration**. Node.js and .NET documentation will be added as those packages are released.
 
 ## Guides
 

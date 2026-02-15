@@ -8,31 +8,27 @@
 
 <p align="center">
   <strong>AI-powered natural language interface for your database.</strong><br>
-  Drop a chat widget into your Laravel app — your users can query, analyze, and modify data just by asking.
+  Add an intelligent chat widget to your app — users can query, analyze, and modify data just by asking.
 </p>
 
 <p align="center">
   <a href="https://github.com/hikmetozcann/botovis/actions"><img src="https://github.com/hikmetozcann/botovis/workflows/Laravel%20Tests/badge.svg" alt="Tests"></a>
-  <a href="https://packagist.org/packages/botovis/botovis-laravel"><img src="https://img.shields.io/packagist/v/botovis/botovis-laravel.svg?style=flat-square" alt="Latest Version"></a>
-  <a href="https://packagist.org/packages/botovis/botovis-laravel"><img src="https://img.shields.io/packagist/dt/botovis/botovis-laravel.svg?style=flat-square" alt="Total Downloads"></a>
-  <a href="https://packagist.org/packages/botovis/botovis-laravel"><img src="https://img.shields.io/packagist/php-v/botovis/botovis-laravel.svg?style=flat-square" alt="PHP Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square" alt="License"></a>
 </p>
 
 <p align="center">
-  <a href="#installation">Installation</a> •
-  <a href="#quick-start">Quick Start</a> •
+  <a href="#packages">Packages</a> •
   <a href="#how-it-works">How It Works</a> •
-  <a href="#configuration">Configuration</a> •
-  <a href="docs/en/README.md">Full Documentation</a> •
-  <a href="docs/tr/README.md">Türkçe Dokümantasyon</a>
+  <a href="#quick-start-laravel">Quick Start</a> •
+  <a href="docs/en/README.md">Documentation</a> •
+  <a href="docs/tr/README.md">Türkçe</a>
 </p>
 
 ---
 
 ## What is Botovis?
 
-Botovis is a Laravel package that adds an AI-powered chat widget to your application. Users can interact with your database using plain language — no SQL, no custom forms, no dashboards.
+Botovis is an **AI-powered database assistant** that you can drop into any application. Users interact with your database using natural language — no SQL, no dashboards, no custom forms.
 
 ```
 User: "How many orders were placed last month?"
@@ -50,66 +46,50 @@ Botovis: Asks for confirmation → Creates the record after approval
 - **Natural language CRUD** — Search, count, aggregate, create, update, delete via conversation
 - **AI Agent with ReAct pattern** — Multi-step reasoning with parallel tool calling
 - **Write protection** — All write operations require explicit user confirmation
-- **Role-based security** — Integrates with your existing auth (Gates, Spatie, custom callbacks)
+- **Role-based security** — Multi-layer auth with schema filtering
 - **Real-time streaming** — Server-Sent Events with live reasoning timeline
 - **Multi-LLM support** — OpenAI, Anthropic (Claude), Ollama (local)
 - **Zero-dependency widget** — Web Component with Shadow DOM, works everywhere
-- **Conversation history** — Persistent chat threads (database or session storage)
+- **Conversation history** — Persistent chat threads
 - **Framework wrappers** — React and Vue 3 components included
-- **i18n** — English and Turkish built-in; AI auto-responds in the user's language
+- **i18n** — English and Turkish built-in
 
 ---
 
-## Installation
+## Packages
 
-```bash
-composer require botovis/botovis
+Botovis is a monorepo with a framework-agnostic core and framework-specific integrations:
+
+| Package | Description | Status |
+|---------|-------------|--------|
+| [`botovis/core`](packages/core) | Contracts, DTOs, agent loop, tool system — no framework dependencies | ✅ Stable |
+| [`botovis/botovis-laravel`](packages/laravel) | Laravel integration — Eloquent, Auth, Blade, Artisan | ✅ Stable |
+| [`@botovis/widget`](packages/widget) | TypeScript chat widget — Web Component, zero dependencies | ✅ Stable |
+| `@botovis/node` | Node.js / Express integration | 🔜 Planned |
+| `botovis/dotnet` | .NET / ASP.NET Core integration | 🔜 Planned |
+
+### Architecture
+
 ```
-
-```bash
-php artisan vendor:publish --tag=botovis-config
-php artisan vendor:publish --tag=botovis-assets
-php artisan migrate
+┌─────────────────────────────────────────────────┐
+│                  @botovis/widget                 │
+│          (Web Component — any frontend)          │
+└──────────────────────┬──────────────────────────┘
+                       │ HTTP / SSE
+┌──────────────────────┴──────────────────────────┐
+│             Framework Integration                │
+│     ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+│     │ Laravel  │  │ Node.js  │  │  .NET    │    │
+│     │    ✅    │  │   🔜     │  │   🔜     │    │
+│     └────┬─────┘  └────┬─────┘  └────┬─────┘    │
+└──────────┼──────────────┼──────────────┼─────────┘
+           │              │              │
+┌──────────┴──────────────┴──────────────┴─────────┐
+│                   botovis/core                    │
+│  Contracts • DTOs • Agent Loop • Tool Registry    │
+│  Schema Models • Security Context • LLM Interface │
+└──────────────────────────────────────────────────┘
 ```
-
-Add your LLM API key to `.env`:
-
-```env
-BOTOVIS_LLM_DRIVER=anthropic
-BOTOVIS_ANTHROPIC_API_KEY=sk-ant-...
-```
-
-> Also supports `openai` and `ollama` drivers. See [Configuration](docs/en/configuration.md).
-
----
-
-## Quick Start
-
-### 1. Register your models
-
-```php
-// config/botovis.php
-'models' => [
-    App\Models\Product::class  => ['create', 'read', 'update', 'delete'],
-    App\Models\Category::class => ['read'],
-    App\Models\Order::class    => ['read'],
-],
-```
-
-### 2. Add the widget
-
-```blade
-@botovisWidget
-```
-
-### 3. Verify
-
-```bash
-php artisan botovis:discover   # See what Botovis found
-php artisan botovis:chat       # Test in terminal
-```
-
-That's it. Visit your app and click the chat button.
 
 ---
 
@@ -121,7 +101,7 @@ Botovis uses an **AI Agent** with the [ReAct](https://arxiv.org/abs/2210.03629) 
 User → "How many orders per status?"
 
 Step 1  Think: "I need to group orders by status"
-        Act:   aggregate(table: orders, function: count, group_by: status)
+        Act:   group_records(table: orders, group_by: status)
         Observe: [{status: pending, count: 42}, {status: shipped, count: 315}, ...]
 
 Step 2  Think: "I have the data, I'll format a table"
@@ -134,24 +114,66 @@ Step 2  Think: "I have the data, I'll format a table"
 |------|------|-------------|
 | `search_records` | Read | Search with filters, sorting, column selection |
 | `count_records` | Read | Count records with optional conditions |
-| `get_sample_data` | Read | Preview table structure and content |
-| `get_column_stats` | Read | Min, max, avg, distinct values |
-| `aggregate` | Read | COUNT, SUM, AVG, MIN, MAX with GROUP BY |
+| `aggregate_records` | Read | SUM, AVG, MIN, MAX with conditions |
+| `group_records` | Read | Group by column with counts |
+| `list_tables` | Read | List accessible tables and columns |
 | `create_record` | **Write** | Create record *(requires confirmation)* |
 | `update_record` | **Write** | Update records *(requires confirmation)* |
 | `delete_record` | **Write** | Delete records *(requires confirmation)* |
 
 ### Parallel Tool Calling
 
-The agent calls multiple tools simultaneously when possible — e.g., counting 7 tables in a single step.
+The agent calls multiple tools simultaneously when possible — e.g., counting 3 tables in a single step.
 
 ### Generate Stopping
 
-If the agent approaches its step limit, it automatically summarizes with available data instead of failing.
+If the agent approaches its step limit, it automatically summarizes with available data instead of failing silently.
 
 ---
 
-## Configuration
+## Quick Start (Laravel)
+
+### 1. Install
+
+```bash
+composer require botovis/botovis-laravel
+```
+
+### 2. Publish & Migrate
+
+```bash
+php artisan vendor:publish --tag=botovis-config
+php artisan vendor:publish --tag=botovis-assets
+php artisan migrate
+```
+
+### 3. Configure LLM
+
+```env
+BOTOVIS_LLM_DRIVER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### 4. Add the Widget
+
+```blade
+@botovisWidget
+```
+
+### 5. Verify
+
+```bash
+php artisan botovis:discover   # See discovered tables
+php artisan botovis:chat       # Test in terminal
+```
+
+That's it. Visit your app and click the chat button.
+
+→ Full guide: [docs/en/installation.md](docs/en/installation.md)
+
+---
+
+## Configuration (Laravel)
 
 Key settings in `config/botovis.php`:
 
@@ -160,7 +182,7 @@ Key settings in `config/botovis.php`:
 'locale' => 'en',              // 'en' or 'tr'
 
 'agent' => [
-    'max_steps' => 10,         // Max reasoning steps
+    'max_steps' => 30,         // Max reasoning steps
     'streaming' => true,       // SSE real-time updates
 ],
 
@@ -169,11 +191,11 @@ Key settings in `config/botovis.php`:
 ],
 
 'security' => [
-    'require_auth' => true,
-    'require_confirmation' => ['create', 'update', 'delete'],
+    'auth' => ['enabled' => true],
+    'write_confirmation' => ['enabled' => true],
     'roles' => [
-        'admin' => ['*' => ['create', 'read', 'update', 'delete']],
-        'user'  => ['*' => ['read']],
+        'admin'  => ['can_read' => true, 'can_write' => true,  'excluded_tables' => []],
+        'viewer' => ['can_read' => true, 'can_write' => false, 'excluded_tables' => ['users']],
     ],
 ],
 ```
@@ -223,9 +245,18 @@ widget.send('How many products are there?');
 
 ## Requirements
 
+### Laravel Integration
 - PHP ≥ 8.1
 - Laravel 10, 11, or 12
 - LLM API key (OpenAI, Anthropic) or local Ollama
+
+## Contributing
+
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+## Security
+
+If you discover a vulnerability, please see [SECURITY.md](SECURITY.md).
 
 ## License
 

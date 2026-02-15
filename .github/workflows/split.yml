@@ -1,0 +1,48 @@
+name: Split Packages
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package:
+          - name: core
+            directory: packages/core
+            target: botovis-core
+          - name: laravel
+            directory: packages/laravel
+            target: botovis-laravel
+          - name: widget
+            directory: packages/widget
+            target: botovis-widget
+
+    name: Split ${{ matrix.package.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Split and push
+        uses: claudiodekker/subtree-split-action@v1
+        with:
+          source-directory: ${{ matrix.package.directory }}
+          target-repository: hikmetozcann/${{ matrix.package.target }}
+          target-branch: main
+          access-token: ${{ secrets.SUBTREE_PAT }}
+
+      - name: Push tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: claudiodekker/subtree-split-action@v1
+        with:
+          source-directory: ${{ matrix.package.directory }}
+          target-repository: hikmetozcann/${{ matrix.package.target }}
+          target-branch: ${{ github.ref_name }}
+          access-token: ${{ secrets.SUBTREE_PAT }}

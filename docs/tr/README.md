@@ -1,6 +1,8 @@
 # Botovis Dokümantasyon
 
-Laravel uygulamalarınıza yapay zeka destekli veritabanı asistanı ekleyen Botovis'in Türkçe dokümantasyonuna hoş geldiniz.
+Yapay zeka destekli veritabanı asistanı Botovis'in Türkçe dokümantasyonuna hoş geldiniz.
+
+> **Not:** Aşağıdaki rehberler şu anda **Laravel entegrasyonunu** kapsamaktadır. Node.js ve .NET dokümantasyonu ilgili paketler yayınlandığında eklenecektir.
 
 ## İçindekiler
 
