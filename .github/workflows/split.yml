@@ -7,23 +7,24 @@ on:
     tags:
       - 'v*'
 
+env:
+  GITHUB_TOKEN: ${{ secrets.SUBTREE_PAT }}
+
 jobs:
   split:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         package:
-          - name: core
-            directory: packages/core
-            target: botovis-core
-          - name: laravel
-            directory: packages/laravel
-            target: botovis-laravel
-          - name: widget
-            directory: packages/widget
-            target: botovis-widget
+          - local_path: core
+            split_repository: botovis-core
+          - local_path: laravel
+            split_repository: botovis-laravel
+          - local_path: widget
+            split_repository: botovis-widget
 
-    name: Split ${{ matrix.package.name }}
+    name: Split ${{ matrix.package.local_path }}
 
     steps:
       - uses: actions/checkout@v4
@@ -31,18 +32,22 @@ jobs:
           fetch-depth: 0
 
       - name: Split and push
-        uses: claudiodekker/subtree-split-action@v1
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: danharrin/monorepo-split-github-action@v2.4.0
         with:
-          source-directory: ${{ matrix.package.directory }}
-          target-repository: hikmetozcann/${{ matrix.package.target }}
-          target-branch: main
-          access-token: ${{ secrets.SUBTREE_PAT }}
+          package_directory: 'packages/${{ matrix.package.local_path }}'
+          repository_organization: 'hikmetozcann'
+          repository_name: '${{ matrix.package.split_repository }}'
+          user_name: 'hikmetozcann'
+          user_email: 'hikmetozcann@users.noreply.github.com'
 
-      - name: Push tag
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: claudiodekker/subtree-split-action@v1
+      - name: Split and push with tag
+        if: "startsWith(github.ref, 'refs/tags/')"
+        uses: danharrin/monorepo-split-github-action@v2.4.0
         with:
-          source-directory: ${{ matrix.package.directory }}
-          target-repository: hikmetozcann/${{ matrix.package.target }}
-          target-branch: ${{ github.ref_name }}
-          access-token: ${{ secrets.SUBTREE_PAT }}
+          tag: ${GITHUB_REF#refs/tags/}
+          package_directory: 'packages/${{ matrix.package.local_path }}'
+          repository_organization: 'hikmetozcann'
+          repository_name: '${{ matrix.package.split_repository }}'
+          user_name: 'hikmetozcann'
+          user_email: 'hikmetozcann@users.noreply.github.com'
