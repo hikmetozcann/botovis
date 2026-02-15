@@ -28,7 +28,12 @@
     "repositories": [
         {
             "type": "path",
-            "url": "../core"
+            "url": "../core",
+            "options": {
+                "versions": {
+                    "botovis/core": "0.1.99"
+                }
+            }
         }
     ],
     "extra": {
