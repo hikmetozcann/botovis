@@ -4,9 +4,13 @@ on:
   push:
     paths:
       - 'packages/laravel/**'
+      - 'packages/core/**'
+      - '.github/workflows/laravel.yml'
   pull_request:
     paths:
       - 'packages/laravel/**'
+      - 'packages/core/**'
+      - '.github/workflows/laravel.yml'
 
 defaults:
   run:
