@@ -1,5 +1,9 @@
 <p align="center">
-  <h1 align="center">Botovis</h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="art/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="art/logo.svg">
+    <img alt="Botovis" src="art/logo.svg" width="320">
+  </picture>
 </p>
 
 <p align="center">
