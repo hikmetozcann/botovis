@@ -75,9 +75,13 @@ class OllamaDriver implements LlmDriverInterface
                 [['role' => 'system', 'content' => $systemPrompt]],
                 $ollamaMessages,
             ),
-            'tools'  => $tools,
             'stream' => false,
         ];
+
+        // Only include tools when available (omit for generate stopping)
+        if (!empty($tools)) {
+            $payload['tools'] = $tools;
+        }
 
         $ch = curl_init();
 
@@ -145,6 +149,9 @@ class OllamaDriver implements LlmDriverInterface
 
     /**
      * Convert normalized tool messages to OpenAI-compatible format (used by Ollama).
+     *
+     * Handles merging consecutive assistant tool_call messages into a single
+     * message with multiple tool_calls (for parallel tool calls).
      */
     private function convertMessages(array $messages): array
     {
@@ -152,20 +159,26 @@ class OllamaDriver implements LlmDriverInterface
 
         foreach ($messages as $msg) {
             if (isset($msg['tool_call'])) {
-                $result[] = [
-                    'role'       => 'assistant',
-                    'content'    => $msg['content'] ?? '',
-                    'tool_calls' => [
-                        [
-                            'id'       => $msg['tool_call']['id'],
-                            'type'     => 'function',
-                            'function' => [
-                                'name'      => $msg['tool_call']['name'],
-                                'arguments' => json_encode($msg['tool_call']['params'], JSON_UNESCAPED_UNICODE),
-                            ],
-                        ],
+                $toolCallEntry = [
+                    'id'       => $msg['tool_call']['id'],
+                    'type'     => 'function',
+                    'function' => [
+                        'name'      => $msg['tool_call']['name'],
+                        'arguments' => json_encode($msg['tool_call']['params'], JSON_UNESCAPED_UNICODE),
                     ],
                 ];
+
+                // Merge with previous assistant message if consecutive
+                $lastIdx = count($result) - 1;
+                if ($lastIdx >= 0 && ($result[$lastIdx]['role'] ?? '') === 'assistant' && isset($result[$lastIdx]['tool_calls'])) {
+                    $result[$lastIdx]['tool_calls'][] = $toolCallEntry;
+                } else {
+                    $result[] = [
+                        'role'       => 'assistant',
+                        'content'    => $msg['content'] ?? '',
+                        'tool_calls' => [$toolCallEntry],
+                    ];
+                }
             } elseif (($msg['role'] ?? '') === 'tool_result') {
                 $result[] = [
                     'role'         => 'tool',
@@ -182,6 +195,7 @@ class OllamaDriver implements LlmDriverInterface
 
     /**
      * Parse Ollama response (OpenAI-compatible format).
+     * Supports parallel tool calls.
      */
     private function parseLlmResponse(array $response): LlmResponse
     {
@@ -190,19 +204,27 @@ class OllamaDriver implements LlmDriverInterface
         $content = $message['content'] ?? null;
 
         if (!empty($toolCalls)) {
-            $call = $toolCalls[0];
-            $fn = $call['function'] ?? [];
-            $params = $fn['arguments'] ?? [];
+            $calls = array_map(function ($call) {
+                $fn = $call['function'] ?? [];
+                $params = $fn['arguments'] ?? [];
+                if (is_string($params)) {
+                    $params = json_decode($params, true) ?? [];
+                }
+                return [
+                    'id'     => $call['id'] ?? ('ollama_' . uniqid()),
+                    'name'   => $fn['name'] ?? '',
+                    'params' => $params,
+                ];
+            }, $toolCalls);
 
-            // Ollama returns arguments as array (not string like OpenAI)
-            if (is_string($params)) {
-                $params = json_decode($params, true) ?? [];
+            if (count($calls) > 1) {
+                return LlmResponse::parallelToolCalls($calls, $content);
             }
 
             return LlmResponse::toolCall(
-                toolName: $fn['name'] ?? '',
-                toolParams: $params,
-                toolCallId: $call['id'] ?? ('ollama_' . uniqid()),
+                toolName: $calls[0]['name'],
+                toolParams: $calls[0]['params'],
+                toolCallId: $calls[0]['id'],
                 thought: $content,
             );
         }

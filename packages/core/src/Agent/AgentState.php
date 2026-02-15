@@ -152,6 +152,22 @@ final class AgentState
     }
 
     /**
+     * Replace an existing tool result message (e.g., after confirmation replaces a pending result).
+     * If not found, adds it as new.
+     */
+    public function replaceToolResultMessage(string $toolCallId, string $content): void
+    {
+        foreach ($this->toolMessages as &$msg) {
+            if (($msg['role'] ?? '') === 'tool_result' && ($msg['tool_call_id'] ?? '') === $toolCallId) {
+                $msg['content'] = $content;
+                return;
+            }
+        }
+        // Not found — add as new
+        $this->addToolResultMessage($toolCallId, $content);
+    }
+
+    /**
      * Get all tool messages for the multi-turn conversation.
      */
     public function getToolMessages(): array

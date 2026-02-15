@@ -274,6 +274,20 @@ export class BotovisChat extends HTMLElement {
   }
 
   private formatToolName(action: string): string {
+    // Handle parallel tool calls (comma-separated action names)
+    const parts = action.split(', ').filter(Boolean);
+    if (parts.length > 1) {
+      const mapped = parts.map(p => this.formatSingleToolName(p));
+      const unique = [...new Set(mapped)];
+      if (unique.length === 1) {
+        return `${unique[0]} ×${parts.length}`;
+      }
+      return unique.join(', ');
+    }
+    return this.formatSingleToolName(action);
+  }
+
+  private formatSingleToolName(action: string): string {
     const match = action.match(/^(\w+)/);
     if (match) {
       const name = match[1];

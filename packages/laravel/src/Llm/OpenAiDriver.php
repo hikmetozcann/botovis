@@ -60,10 +60,14 @@ class OpenAiDriver implements LlmDriverInterface
                 [['role' => 'system', 'content' => $systemPrompt]],
                 $openaiMessages,
             ),
-            'tools'       => $tools,
             'temperature' => 0.1,
             'max_tokens'  => 2048,
         ];
+
+        // Only include tools when available (omit for generate stopping)
+        if (!empty($tools)) {
+            $payload['tools'] = $tools;
+        }
 
         $response = $this->request('/chat/completions', $payload);
 
@@ -73,11 +77,8 @@ class OpenAiDriver implements LlmDriverInterface
     /**
      * Convert normalized tool messages to OpenAI API format.
      *
-     * Normalized (from AgentState):
-     *   assistant + tool_call → OpenAI assistant with tool_calls array
-     *   tool_result           → OpenAI tool role message
-     *
-     * Standard messages pass through unchanged.
+     * Handles merging consecutive assistant tool_call messages into a single
+     * message with multiple tool_calls (required for parallel tool calls).
      */
     private function convertMessages(array $messages): array
     {
@@ -85,24 +86,29 @@ class OpenAiDriver implements LlmDriverInterface
 
         foreach ($messages as $msg) {
             if (isset($msg['tool_call'])) {
-                // Assistant tool call → OpenAI format
-                $result[] = [
-                    'role'       => 'assistant',
-                    'content'    => $msg['content'] ?? null,
-                    'tool_calls' => [
-                        [
-                            'id'       => $msg['tool_call']['id'],
-                            'type'     => 'function',
-                            'function' => [
-                                'name'      => $msg['tool_call']['name'],
-                                'arguments' => json_encode($msg['tool_call']['params'], JSON_UNESCAPED_UNICODE),
-                            ],
-                        ],
+                $toolCallEntry = [
+                    'id'       => $msg['tool_call']['id'],
+                    'type'     => 'function',
+                    'function' => [
+                        'name'      => $msg['tool_call']['name'],
+                        'arguments' => json_encode($msg['tool_call']['params'], JSON_UNESCAPED_UNICODE),
                     ],
                 ];
 
+                // Merge with previous assistant message if consecutive
+                $lastIdx = count($result) - 1;
+                if ($lastIdx >= 0 && ($result[$lastIdx]['role'] ?? '') === 'assistant' && isset($result[$lastIdx]['tool_calls'])) {
+                    $result[$lastIdx]['tool_calls'][] = $toolCallEntry;
+                } else {
+                    $result[] = [
+                        'role'       => 'assistant',
+                        'content'    => $msg['content'] ?? null,
+                        'tool_calls' => [$toolCallEntry],
+                    ];
+                }
+
             } elseif (($msg['role'] ?? '') === 'tool_result') {
-                // Tool result → OpenAI tool message
+                // Tool result → OpenAI tool message (one per tool call — no merging needed)
                 $result[] = [
                     'role'         => 'tool',
                     'tool_call_id' => $msg['tool_call_id'],
@@ -229,9 +235,8 @@ class OpenAiDriver implements LlmDriverInterface
     /**
      * Parse OpenAI response into structured LlmResponse.
      *
-     * OpenAI returns:
-     * - `tool_calls` array in the message → LlmResponse::toolCall (first call)
-     * - `content` field → LlmResponse::text
+     * Supports parallel tool calls — when multiple tool_calls are returned,
+     * creates an LlmResponse::parallelToolCalls.
      */
     private function parseLlmResponse(array $response): LlmResponse
     {
@@ -240,14 +245,24 @@ class OpenAiDriver implements LlmDriverInterface
         $content = $message['content'] ?? null;
 
         if (!empty($toolCalls)) {
-            $call = $toolCalls[0]; // Take the first tool call
-            $params = json_decode($call['function']['arguments'] ?? '{}', true) ?? [];
+            $calls = array_map(function ($call) {
+                $params = json_decode($call['function']['arguments'] ?? '{}', true) ?? [];
+                return [
+                    'id'     => $call['id'],
+                    'name'   => $call['function']['name'],
+                    'params' => $params,
+                ];
+            }, $toolCalls);
+
+            if (count($calls) > 1) {
+                return LlmResponse::parallelToolCalls($calls, $content);
+            }
 
             return LlmResponse::toolCall(
-                toolName: $call['function']['name'],
-                toolParams: $params,
-                toolCallId: $call['id'],
-                thought: $content, // OpenAI can include text alongside tool calls
+                toolName: $calls[0]['name'],
+                toolParams: $calls[0]['params'],
+                toolCallId: $calls[0]['id'],
+                thought: $content,
             );
         }
 

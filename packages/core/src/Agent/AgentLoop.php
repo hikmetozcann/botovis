@@ -114,13 +114,19 @@ class AgentLoop
     /**
      * Execute a single reasoning step using native tool calling.
      *
-     * Instead of parsing raw JSON from the LLM, we use the provider's
-     * native tool calling API which returns structured LlmResponse objects.
+     * Supports parallel tool calls — when the LLM returns multiple tool calls
+     * in a single response, all are executed within one step (saving step budget).
+     *
+     * Generate stopping: on the last available step, tools are removed so the
+     * LLM is forced to produce a text response with whatever data it has.
      */
     private function executeStepAndReturn(AgentState $state, array $history): ?AgentStep
     {
         $systemPrompt = $this->buildSystemPrompt($state);
-        $toolDefs = $this->tools->toFunctionDefinitions();
+
+        // Generate stopping: on last step, force text response by removing tools
+        $stepsRemaining = $state->maxSteps - count($state->getSteps());
+        $toolDefs = $stepsRemaining <= 1 ? [] : $this->tools->toFunctionDefinitions();
 
         // Build messages: conversation history + user message + tool calling messages
         $messages = array_merge(
@@ -137,50 +143,97 @@ class AgentLoop
             return null;
         }
 
-        // Tool call response
+        // Tool call response — handle single or parallel
         if ($response->isToolCall()) {
-            $step = AgentStep::action(
-                $state->getCurrentStepNumber(),
-                $response->thought ?? '',
-                $response->toolName,
-                $response->toolParams,
-            );
-
-            // Add tool call to conversation messages
-            $state->addToolCallMessage(
-                $response->toolCallId,
-                $response->toolName,
-                $response->toolParams,
-                $response->thought,
-            );
-
-            // Check if action needs confirmation (write operations)
-            $tool = $this->tools->get($response->toolName);
-            if ($tool && $tool->requiresConfirmation()) {
-                $state->addStep($step);
-                $this->notifyStep($step, $state);
-                $state->needsConfirmation(
-                    $response->toolName,
-                    $response->toolParams,
-                    $response->thought ?? '',
-                    $response->toolCallId,
-                );
-                return $step;
-            }
-
-            // Execute the tool
-            $result = $this->tools->execute($response->toolName, $response->toolParams);
-
-            // Add tool result to conversation messages
-            $state->addToolResultMessage($response->toolCallId, $result->toObservation());
-
-            $step = $step->withObservation($result->toObservation());
-            $state->addStep($step);
-            $this->notifyStep($step, $state);
-            return $step;
+            return $this->handleToolCalls($response, $state);
         }
 
         return null;
+    }
+
+    /**
+     * Handle one or more tool calls from a single LLM response.
+     *
+     * For parallel calls:
+     * - All tool call messages are added to state first (required by APIs)
+     * - Read tools are executed immediately
+     * - Write tools that need confirmation get a "[PENDING]" result
+     * - If any tool needs confirmation, the loop pauses
+     * - All results count as a single step
+     */
+    private function handleToolCalls(LlmResponse $response, AgentState $state): ?AgentStep
+    {
+        $toolCalls = $response->toolCalls;
+        $thought = $response->thought ?? '';
+
+        // 1. Add ALL tool call messages to state first
+        //    (APIs require balanced tool_call / tool_result pairs)
+        foreach ($toolCalls as $i => $tc) {
+            $state->addToolCallMessage(
+                $tc['id'],
+                $tc['name'],
+                $tc['params'],
+                $i === 0 ? $thought : null,  // thought only on first
+            );
+        }
+
+        // 2. Process each tool call
+        $observations = [];
+        $confirmationTool = null;
+
+        foreach ($toolCalls as $tc) {
+            $tool = $this->tools->get($tc['name']);
+
+            if ($tool && $tool->requiresConfirmation()) {
+                // Write tool — don't execute, mark pending
+                $state->addToolResultMessage(
+                    $tc['id'],
+                    '[PENDING] This operation requires user confirmation before execution.',
+                );
+                if (!$confirmationTool) {
+                    $confirmationTool = $tc;
+                }
+                $observations[] = "[PENDING confirmation] {$tc['name']}";
+            } else {
+                // Read tool — execute immediately
+                $result = $this->tools->execute($tc['name'], $tc['params']);
+                $state->addToolResultMessage($tc['id'], $result->toObservation());
+                $observations[] = $result->toObservation();
+            }
+        }
+
+        // 3. Build step for UI
+        $actionNames = array_map(fn($tc) => $tc['name'], $toolCalls);
+        $actionLabel = count($actionNames) > 1
+            ? implode(', ', $actionNames)
+            : $actionNames[0];
+
+        $step = AgentStep::action(
+            $state->getCurrentStepNumber(),
+            $thought,
+            $actionLabel,
+            $toolCalls[0]['params'],
+        );
+
+        // 4. If any tool needs confirmation, pause
+        if ($confirmationTool) {
+            $state->addStep($step);
+            $this->notifyStep($step, $state);
+            $state->needsConfirmation(
+                $confirmationTool['name'],
+                $confirmationTool['params'],
+                $thought,
+                $confirmationTool['id'],
+            );
+            return $step;
+        }
+
+        // 5. All tools executed — combine observations
+        $combinedObs = implode("\n---\n", $observations);
+        $step = $step->withObservation($combinedObs);
+        $state->addStep($step);
+        $this->notifyStep($step, $state);
+        return $step;
     }
 
     /**
@@ -218,12 +271,12 @@ class AgentLoop
             'maxSteps' => $state->maxSteps,
         ]);
 
-        // Add tool result to conversation messages
+        // Add tool result to conversation messages (replaces [PENDING] placeholder if exists)
         $toolCallId = $pending['tool_call_id'] ?? ('confirmed_' . uniqid());
         $prefix = $result->success ? '[CONFIRMED_SUCCESS]' : '[CONFIRMED_FAILED]';
         $observation = $prefix . ' ' . $result->toObservation();
 
-        $state->addToolResultMessage($toolCallId, $observation);
+        $state->replaceToolResultMessage($toolCallId, $observation);
         
         // Replace the last step (which had no observation) with observation
         $lastStep = $state->getLastStep();
@@ -262,6 +315,17 @@ class AgentLoop
     {
         $schemaContext = $this->schema->toPromptContext();
         $userContext = $this->buildUserContext();
+        $currentStep = $state->getCurrentStepNumber();
+        $maxSteps = $state->maxSteps;
+        $stepsRemaining = $maxSteps - count($state->getSteps());
+
+        // Generate stopping: warn the LLM when steps are running low
+        $urgency = '';
+        if ($stepsRemaining <= 1) {
+            $urgency = "\n\nCRITICAL: This is your LAST step. You MUST provide your final answer NOW using all the data you have gathered so far. Do NOT attempt to call any more tools. Summarize your findings and respond to the user.";
+        } elseif ($stepsRemaining <= 3) {
+            $urgency = "\n\nWARNING: You only have {$stepsRemaining} steps remaining. Wrap up your analysis and provide your answer soon. Only call tools if absolutely essential.";
+        }
 
         return <<<PROMPT
 You are Botovis, an intelligent AI agent that helps users interact with their database through natural language.
@@ -280,9 +344,10 @@ RULES:
 5. Be concise but complete in your final answers. Use markdown for formatting tables and lists.
 6. If the user asks for analysis or opinions, gather relevant data first, then provide insights.
 7. NEVER guess column names or values — always verify with tools first.
-8. Current step: {$state->getCurrentStepNumber()} of {$state->maxSteps} max steps.
+8. Current step: {$currentStep} of {$maxSteps} max steps.
 9. ALWAYS respond in the same language the user writes in. Match their language exactly.
 10. When you see [CONFIRMED_SUCCESS] or [CONFIRMED_FAILED] in a tool result, it means the user confirmed a write operation and it was executed. Provide a clear summary of what happened.
+11. When you need data from multiple tables or multiple counts, call all the tools at once in parallel instead of one by one. This saves steps.{$urgency}
 PROMPT;
     }
 

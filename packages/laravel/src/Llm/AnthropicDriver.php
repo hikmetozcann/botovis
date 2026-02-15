@@ -49,7 +49,6 @@ class AnthropicDriver implements LlmDriverInterface
      */
     public function chatWithTools(string $systemPrompt, array $messages, array $tools): LlmResponse
     {
-        $anthropicTools = $this->convertToolDefinitions($tools);
         $anthropicMessages = $this->convertMessages($messages);
 
         $payload = [
@@ -57,8 +56,12 @@ class AnthropicDriver implements LlmDriverInterface
             'max_tokens' => 2048,
             'system'     => $systemPrompt,
             'messages'   => $anthropicMessages,
-            'tools'      => $anthropicTools,
         ];
+
+        // Only include tools when available (omit for generate stopping)
+        if (!empty($tools)) {
+            $payload['tools'] = $this->convertToolDefinitions($tools);
+        }
 
         $response = $this->request($payload);
 
@@ -99,11 +102,9 @@ class AnthropicDriver implements LlmDriverInterface
     /**
      * Convert normalized tool messages to Anthropic API format.
      *
-     * Normalized (from AgentState):
-     *   assistant + tool_call → Anthropic assistant with content blocks [text, tool_use]
-     *   tool_result           → Anthropic user with content block [tool_result]
-     *
-     * Standard messages (user/assistant with string content) pass through unchanged.
+     * Handles merging consecutive same-role messages (required by Anthropic API).
+     * When parallel tool calls produce multiple consecutive assistant/tool_result messages,
+     * they are merged into single messages with multiple content blocks.
      */
     private function convertMessages(array $messages): array
     {
@@ -122,20 +123,30 @@ class AnthropicDriver implements LlmDriverInterface
                     'name'  => $msg['tool_call']['name'],
                     'input' => !empty($msg['tool_call']['params']) ? $msg['tool_call']['params'] : new \stdClass(),
                 ];
-                $result[] = ['role' => 'assistant', 'content' => $content];
+
+                // Merge with previous assistant message if consecutive
+                $lastIdx = count($result) - 1;
+                if ($lastIdx >= 0 && ($result[$lastIdx]['role'] ?? '') === 'assistant' && is_array($result[$lastIdx]['content'] ?? null)) {
+                    $result[$lastIdx]['content'] = array_merge($result[$lastIdx]['content'], $content);
+                } else {
+                    $result[] = ['role' => 'assistant', 'content' => $content];
+                }
 
             } elseif (($msg['role'] ?? '') === 'tool_result') {
                 // Tool result → Anthropic user message with tool_result block
-                $result[] = [
-                    'role'    => 'user',
-                    'content' => [
-                        [
-                            'type'        => 'tool_result',
-                            'tool_use_id' => $msg['tool_call_id'],
-                            'content'     => $msg['content'],
-                        ],
-                    ],
+                $block = [
+                    'type'        => 'tool_result',
+                    'tool_use_id' => $msg['tool_call_id'],
+                    'content'     => $msg['content'],
                 ];
+
+                // Merge with previous user/tool_result message if consecutive
+                $lastIdx = count($result) - 1;
+                if ($lastIdx >= 0 && ($result[$lastIdx]['role'] ?? '') === 'user' && is_array($result[$lastIdx]['content'] ?? null)) {
+                    $result[$lastIdx]['content'][] = $block;
+                } else {
+                    $result[] = ['role' => 'user', 'content' => [$block]];
+                }
 
             } else {
                 // Standard user/assistant message — pass through
@@ -150,33 +161,44 @@ class AnthropicDriver implements LlmDriverInterface
      * Parse Anthropic API response into structured LlmResponse.
      *
      * Anthropic returns content blocks. We look for:
-     * - `tool_use` block → LlmResponse::toolCall
-     * - `text` block → LlmResponse::text
-     *
-     * When both exist (thinking + tool call), the text becomes the "thought".
+     * - Multiple `tool_use` blocks → LlmResponse::parallelToolCalls
+     * - Single `tool_use` block   → LlmResponse::toolCall
+     * - `text` block only         → LlmResponse::text
      */
     private function parseLlmResponse(array $response): LlmResponse
     {
         $content = $response['content'] ?? [];
         $textParts = [];
-        $toolCall = null;
+        $toolUseBlocks = [];
 
         foreach ($content as $block) {
             if ($block['type'] === 'text') {
                 $textParts[] = $block['text'];
             } elseif ($block['type'] === 'tool_use') {
-                $toolCall = $block;
+                $toolUseBlocks[] = $block;
             }
         }
 
         $thought = !empty($textParts) ? implode("\n", $textParts) : null;
 
-        // If there's a tool call, return it (with optional thought)
-        if ($toolCall) {
+        // Multiple tool calls → parallel
+        if (count($toolUseBlocks) > 1) {
+            $calls = array_map(fn($b) => [
+                'id'     => $b['id'],
+                'name'   => $b['name'],
+                'params' => $b['input'] ?? [],
+            ], $toolUseBlocks);
+
+            return LlmResponse::parallelToolCalls($calls, $thought);
+        }
+
+        // Single tool call
+        if (count($toolUseBlocks) === 1) {
+            $tc = $toolUseBlocks[0];
             return LlmResponse::toolCall(
-                toolName: $toolCall['name'],
-                toolParams: $toolCall['input'] ?? [],
-                toolCallId: $toolCall['id'],
+                toolName: $tc['name'],
+                toolParams: $tc['input'] ?? [],
+                toolCallId: $tc['id'],
                 thought: $thought,
             );
         }
