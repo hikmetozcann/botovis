@@ -12,6 +12,14 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/hikmetozcann/botovis/actions"><img src="https://github.com/hikmetozcann/botovis/workflows/Laravel%20Tests/badge.svg" alt="Tests"></a>
+  <a href="https://packagist.org/packages/botovis/botovis-laravel"><img src="https://img.shields.io/packagist/v/botovis/botovis-laravel.svg?style=flat-square" alt="Latest Version"></a>
+  <a href="https://packagist.org/packages/botovis/botovis-laravel"><img src="https://img.shields.io/packagist/dt/botovis/botovis-laravel.svg?style=flat-square" alt="Total Downloads"></a>
+  <a href="https://packagist.org/packages/botovis/botovis-laravel"><img src="https://img.shields.io/packagist/php-v/botovis/botovis-laravel.svg?style=flat-square" alt="PHP Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square" alt="License"></a>
+</p>
+
+<p align="center">
   <a href="#installation">Installation</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#how-it-works">How It Works</a> •
