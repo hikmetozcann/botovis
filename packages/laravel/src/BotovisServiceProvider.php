@@ -156,12 +156,9 @@ class BotovisServiceProvider extends ServiceProvider
         }
 
         // ── Widget asset publishing ──
-        $widgetDist = realpath(__DIR__ . '/../../widget/dist');
-        if ($widgetDist) {
-            $this->publishes([
-                $widgetDist => public_path('vendor/botovis'),
-            ], 'botovis-assets');
-        }
+        $this->publishes([
+            __DIR__ . '/../resources/dist' => public_path('vendor/botovis'),
+        ], 'botovis-assets');
 
         // ── Views ──
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'botovis');
