@@ -6,6 +6,7 @@ namespace Botovis\Telegram;
 
 use Botovis\Core\Agent\AgentOrchestrator;
 use Botovis\Core\Agent\AgentResponse;
+use Botovis\Core\Agent\StreamingEvent;
 use Botovis\Core\DTO\SecurityContext;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -257,12 +258,70 @@ class TelegramAdapter
         // Set security context for this user
         $this->setSecurityContextForUser($user);
 
-        // Send typing indicator
+        // Send initial typing indicator
         $this->api->sendTypingAction($chatId);
+        $lastTyping = time();
 
         try {
-            $response = $this->orchestrator->handle($conversationId, $text);
-            $this->sendResponse($chatId, $response, $conversationId);
+            // Use streaming to get step-by-step events
+            // This lets us refresh the typing indicator between steps
+            $stream = $this->orchestrator->stream($conversationId, $text);
+
+            $finalMessage = null;
+            $finalSteps = [];
+            $confirmationData = null;
+            $errorMessage = null;
+
+            foreach ($stream as $event) {
+                // Refresh typing indicator every 4 seconds
+                if (time() - $lastTyping >= 4) {
+                    $this->api->sendTypingAction($chatId);
+                    $lastTyping = time();
+                }
+
+                match ($event->type) {
+                    StreamingEvent::TYPE_STEP => $finalSteps[] = $event->data,
+                    StreamingEvent::TYPE_MESSAGE => $finalMessage = $event->data['content'] ?? '',
+                    StreamingEvent::TYPE_CONFIRMATION => $confirmationData = $event->data,
+                    StreamingEvent::TYPE_ERROR => $errorMessage = $event->data['message'] ?? 'Bilinmeyen hata',
+                    default => null,
+                };
+            }
+
+            // Show reasoning steps if enabled
+            if (config('botovis-telegram.show_steps', false) && !empty($finalSteps)) {
+                foreach ($finalSteps as $step) {
+                    $action = $step['action'] ?? '';
+                    $thought = $step['thought'] ?? '';
+                    if ($action) {
+                        $stepText = TelegramFormatter::formatStep($thought, $action, $step['action_params'] ?? []);
+                        if ($stepText) {
+                            try {
+                                $this->api->sendMessage($chatId, $stepText, 'HTML');
+                            } catch (\Throwable) {
+                                $this->api->sendPlainMessage($chatId, "🔧 {$action}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Send final response
+            if ($confirmationData) {
+                $response = AgentResponse::confirmation(
+                    $confirmationData['description'] ?? '',
+                    [
+                        'action' => $confirmationData['action'] ?? '',
+                        'params' => $confirmationData['params'] ?? [],
+                    ],
+                );
+                $this->sendConfirmation($chatId, $response, $conversationId);
+            } elseif ($errorMessage) {
+                $this->api->sendPlainMessage($chatId, "❌ " . $errorMessage);
+            } elseif ($finalMessage) {
+                $this->sendFormattedMessage($chatId, $finalMessage);
+            }
+
         } catch (\Throwable $e) {
             Log::error('[Botovis Telegram] Error processing message', [
                 'chat_id' => $chatId,
@@ -274,38 +333,7 @@ class TelegramAdapter
     }
 
     /**
-     * Send an AgentResponse back to Telegram.
-     */
-    private function sendResponse(string $chatId, AgentResponse $response, string $conversationId): void
-    {
-        // Show reasoning steps if enabled
-        if (config('botovis-telegram.show_steps', false) && !empty($response->steps)) {
-            foreach ($response->steps as $step) {
-                $thought = $step['thought'] ?? '';
-                $action = $step['action'] ?? '';
-                if ($action) {
-                    $stepText = TelegramFormatter::formatStep($thought, $action, $step['action_params'] ?? []);
-                    if ($stepText) {
-                        try {
-                            $this->api->sendMessage($chatId, $stepText, 'HTML');
-                        } catch (\Throwable) {
-                            $this->api->sendPlainMessage($chatId, "🔧 {$action}");
-                        }
-                    }
-                }
-            }
-        }
-
-        // Handle response based on type
-        match ($response->type) {
-            AgentResponse::TYPE_CONFIRMATION => $this->sendConfirmation($chatId, $response, $conversationId),
-            AgentResponse::TYPE_ERROR => $this->api->sendPlainMessage($chatId, "❌ " . $response->message),
-            default => $this->sendFormattedMessage($chatId, $response->message),
-        };
-    }
-
-    /**
-     * Send a formatted text message, with MarkdownV2 fallback to plain.
+     * Send a formatted text message, with HTML fallback to plain.
      */
     private function sendFormattedMessage(string $chatId, string $message): void
     {
@@ -387,8 +415,8 @@ class TelegramAdapter
                     $this->api->editMessageText(
                         $chatId,
                         $messageId,
-                        TelegramFormatter::escapeMarkdownV2('✅ İşlem onaylandı.'),
-                        'MarkdownV2',
+                        '✅ İşlem onaylandı.',
+                        'HTML',
                     );
                 } catch (\Throwable) {
                     // Editing might fail if message is too old
@@ -405,8 +433,8 @@ class TelegramAdapter
                     $this->api->editMessageText(
                         $chatId,
                         $messageId,
-                        TelegramFormatter::escapeMarkdownV2('❌ İşlem iptal edildi.'),
-                        'MarkdownV2',
+                        '❌ İşlem iptal edildi.',
+                        'HTML',
                     );
                 } catch (\Throwable) {
                     // Editing might fail

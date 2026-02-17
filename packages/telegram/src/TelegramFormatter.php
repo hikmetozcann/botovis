@@ -37,7 +37,7 @@ class TelegramFormatter
      */
     public static function formatConfirmation(string $message, ?array $pendingAction): string
     {
-        $lines = ['⚠️ <b>Yazma İşlemi</b>'];
+        $lines = ['⚠️ <b>Onay Gerekiyor</b>'];
         $lines[] = '';
 
         if ($pendingAction) {
@@ -45,21 +45,67 @@ class TelegramFormatter
             $params = $pendingAction['params'] ?? [];
             $table = $params['table'] ?? '';
 
-            $lines[] = '🔧 <code>' . self::escapeHtml($action) . '</code>: <b>' . self::escapeHtml($table) . '</b>';
+            // Human-readable action label
+            $actionLabel = match ($action) {
+                'create_record' => '➕ Yeni kayıt oluştur',
+                'update_record' => '✏️ Kayıt güncelle',
+                'delete_record' => '🗑 Kayıt sil',
+                default => '🔧 ' . $action,
+            };
 
+            $lines[] = $actionLabel;
+            $lines[] = '📋 <b>Tablo:</b> ' . self::escapeHtml($table);
+            $lines[] = '';
+
+            // Format where/data/conditions nicely
             foreach ($params as $key => $value) {
                 if ($key === 'table') continue;
-                $valueStr = is_array($value)
-                    ? json_encode($value, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
-                    : (string) $value;
-                $lines[] = '   <i>' . self::escapeHtml($key) . '</i>: <code>' . self::escapeHtml($valueStr) . '</code>';
-            }
 
-            $lines[] = '';
+                $label = match ($key) {
+                    'where', 'conditions' => '🔍 Koşul',
+                    'data' => '📝 Veri',
+                    default => '📌 ' . ucfirst($key),
+                };
+
+                $lines[] = '<b>' . $label . ':</b>';
+
+                if (is_array($value)) {
+                    $lines[] = self::formatKeyValueBlock($value);
+                } else {
+                    $lines[] = '<code>' . self::escapeHtml((string) $value) . '</code>';
+                }
+                $lines[] = '';
+            }
         }
 
         if ($message) {
             $lines[] = self::escapeHtml($message);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Format an associative array as readable key-value lines.
+     */
+    private static function formatKeyValueBlock(array $data, int $indent = 0): string
+    {
+        $lines = [];
+        $prefix = str_repeat('  ', $indent);
+
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                // Nested object — try to flatten one level
+                $nested = json_encode($value, JSON_UNESCAPED_UNICODE);
+                if (mb_strlen($nested) < 80) {
+                    $lines[] = $prefix . '  • <i>' . self::escapeHtml((string) $key) . '</i>: <code>' . self::escapeHtml($nested) . '</code>';
+                } else {
+                    $lines[] = $prefix . '  • <i>' . self::escapeHtml((string) $key) . '</i>:';
+                    $lines[] = self::formatKeyValueBlock($value, $indent + 1);
+                }
+            } else {
+                $lines[] = $prefix . '  • <i>' . self::escapeHtml((string) $key) . '</i>: <code>' . self::escapeHtml((string) $value) . '</code>';
+            }
         }
 
         return implode("\n", $lines);
