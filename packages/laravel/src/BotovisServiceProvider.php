@@ -25,6 +25,7 @@ use Botovis\Laravel\Repositories\SessionConversationRepository;
 use Botovis\Laravel\Security\BotovisAuthorizer;
 use Botovis\Laravel\Commands\DiscoverCommand;
 use Botovis\Laravel\Commands\ChatCommand;
+use Botovis\Laravel\Commands\ModelsCommand;
 use Botovis\Laravel\Tools\SearchRecordsTool;
 use Botovis\Laravel\Tools\CountRecordsTool;
 use Botovis\Laravel\Tools\GetSampleDataTool;
@@ -178,6 +179,7 @@ class BotovisServiceProvider extends ServiceProvider
             $this->commands([
                 DiscoverCommand::class,
                 ChatCommand::class,
+                ModelsCommand::class,
             ]);
         }
 
