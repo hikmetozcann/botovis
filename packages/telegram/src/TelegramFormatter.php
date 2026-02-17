@@ -5,24 +5,19 @@ declare(strict_types=1);
 namespace Botovis\Telegram;
 
 /**
- * Format Botovis responses for Telegram.
+ * Format Botovis responses for Telegram using HTML parse mode.
  *
- * Handles Markdown → MarkdownV2 conversion and table formatting
- * for Telegram's limited markup support.
+ * HTML is far more reliable than MarkdownV2 for Telegram —
+ * no insane escaping rules, predictable rendering.
+ *
+ * Supported HTML tags:
+ *   <b>, <i>, <u>, <s>, <code>, <pre>, <a href="">
+ *   https://core.telegram.org/bots/api#html-style
  */
 class TelegramFormatter
 {
     /**
-     * Characters that must be escaped in Telegram MarkdownV2.
-     * See: https://core.telegram.org/bots/api#markdownv2-style
-     */
-    private const ESCAPE_CHARS = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'];
-
-    /**
-     * Format a Botovis response message for Telegram.
-     *
-     * Tries MarkdownV2 first; if escaping fails or content is too complex,
-     * falls back to plain text.
+     * Format a Botovis response message for Telegram HTML.
      *
      * @return array{text: string, parse_mode: string}
      */
@@ -32,18 +27,9 @@ class TelegramFormatter
             return ['text' => '...', 'parse_mode' => ''];
         }
 
-        // Try to convert markdown tables to monospace
-        $message = self::convertTables($message);
+        $html = self::markdownToHtml($message);
 
-        // Try MarkdownV2 formatting
-        $formatted = self::toMarkdownV2($message);
-
-        if ($formatted !== null) {
-            return ['text' => $formatted, 'parse_mode' => 'MarkdownV2'];
-        }
-
-        // Fallback: strip markdown and send as plain text
-        return ['text' => self::stripMarkdown($message), 'parse_mode' => ''];
+        return ['text' => $html, 'parse_mode' => 'HTML'];
     }
 
     /**
@@ -51,7 +37,7 @@ class TelegramFormatter
      */
     public static function formatConfirmation(string $message, ?array $pendingAction): string
     {
-        $lines = ['⚠️ *Yazma İşlemi*'];
+        $lines = ['⚠️ <b>Yazma İşlemi</b>'];
         $lines[] = '';
 
         if ($pendingAction) {
@@ -59,20 +45,21 @@ class TelegramFormatter
             $params = $pendingAction['params'] ?? [];
             $table = $params['table'] ?? '';
 
-            $lines[] = self::escapeMarkdownV2("🔧 {$action}: {$table}");
+            $lines[] = '🔧 <code>' . self::escapeHtml($action) . '</code>: <b>' . self::escapeHtml($table) . '</b>';
 
-            // Show key parameters
             foreach ($params as $key => $value) {
                 if ($key === 'table') continue;
-                $valueStr = is_array($value) ? json_encode($value, JSON_UNESCAPED_UNICODE) : (string) $value;
-                $lines[] = self::escapeMarkdownV2("   {$key}: {$valueStr}");
+                $valueStr = is_array($value)
+                    ? json_encode($value, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
+                    : (string) $value;
+                $lines[] = '   <i>' . self::escapeHtml($key) . '</i>: <code>' . self::escapeHtml($valueStr) . '</code>';
             }
 
             $lines[] = '';
         }
 
         if ($message) {
-            $lines[] = self::escapeMarkdownV2($message);
+            $lines[] = self::escapeHtml($message);
         }
 
         return implode("\n", $lines);
@@ -86,14 +73,14 @@ class TelegramFormatter
         $parts = [];
 
         if ($thought) {
-            $parts[] = '💭 ' . self::escapeMarkdownV2($thought);
+            $parts[] = '💭 <i>' . self::escapeHtml($thought) . '</i>';
         }
 
         if ($action) {
-            $paramStr = !empty($params) ? json_encode($params, JSON_UNESCAPED_UNICODE) : '';
-            $parts[] = '🔧 `' . $action . '`';
-            if ($paramStr) {
-                $parts[] = '```json' . "\n" . $paramStr . "\n" . '```';
+            $parts[] = '🔧 <code>' . self::escapeHtml($action) . '</code>';
+            if (!empty($params)) {
+                $json = json_encode($params, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+                $parts[] = '<pre>' . self::escapeHtml($json) . '</pre>';
             }
         }
 
@@ -101,17 +88,79 @@ class TelegramFormatter
     }
 
     /**
-     * Convert standard Markdown tables to monospace format.
-     *
-     * Input:
-     *   | Name | Price |
-     *   |------|-------|
-     *   | iPhone | 999 |
-     *
-     * Output (monospace):
-     *   Name    | Price
-     *   --------|------
-     *   iPhone  | 999
+     * Convert standard Markdown to Telegram-supported HTML.
+     */
+    public static function markdownToHtml(string $text): string
+    {
+        // ── 1. Protect code blocks ──
+        $codeBlocks = [];
+        $text = preg_replace_callback('/```(\w*)\n?([\s\S]*?)```/', function ($m) use (&$codeBlocks) {
+            $lang = $m[1] ?: '';
+            $code = rtrim($m[2]);
+            $key = "\x00CB" . count($codeBlocks) . "\x00";
+            $langAttr = $lang ? ' class="language-' . self::escapeHtml($lang) . '"' : '';
+            $codeBlocks[$key] = '<pre' . $langAttr . '>' . self::escapeHtml($code) . '</pre>';
+            return $key;
+        }, $text) ?? $text;
+
+        // ── 2. Protect inline code ──
+        $inlineCodes = [];
+        $text = preg_replace_callback('/`([^`\n]+)`/', function ($m) use (&$inlineCodes) {
+            $key = "\x00IC" . count($inlineCodes) . "\x00";
+            $inlineCodes[$key] = '<code>' . self::escapeHtml($m[1]) . '</code>';
+            return $key;
+        }, $text) ?? $text;
+
+        // ── 3. Escape HTML in remaining text ──
+        $text = self::escapeHtml($text);
+
+        // ── 4. Restore protected blocks ──
+        foreach ($codeBlocks as $key => $value) {
+            $text = str_replace(self::escapeHtml($key), $value, $text);
+        }
+        foreach ($inlineCodes as $key => $value) {
+            $text = str_replace(self::escapeHtml($key), $value, $text);
+        }
+
+        // ── 5. Convert Markdown tables → monospace ──
+        $text = self::convertTables($text);
+
+        // ── 6. Bold: **text** → <b>text</b> ──
+        $text = preg_replace('/\*\*(.+?)\*\*/s', '<b>$1</b>', $text) ?? $text;
+
+        // ── 7. Italic: *text* → <i>text</i> (not at word boundaries to avoid list conflicts) ──
+        $text = preg_replace('/(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)/s', '<i>$1</i>', $text) ?? $text;
+
+        // ── 8. Strikethrough: ~~text~~ → <s>text</s> ──
+        $text = preg_replace('/~~(.+?)~~/s', '<s>$1</s>', $text) ?? $text;
+
+        // ── 9. Links: [text](url) → <a href="url">text</a> ──
+        $text = preg_replace(
+            '/\[([^\]]+)\]\(([^)]+)\)/',
+            '<a href="$2">$1</a>',
+            $text
+        ) ?? $text;
+
+        // ── 10. Headers: # Title → <b>Title</b> ──
+        $text = preg_replace('/^#{1,6}\s+(.+)$/m', '<b>$1</b>', $text) ?? $text;
+
+        // ── 11. List items: * item or - item → • item ──
+        $text = preg_replace('/^[\s]*[\*\-]\s+/m', '• ', $text) ?? $text;
+
+        // ── 12. Numbered lists: clean up ──
+        $text = preg_replace('/^(\s*\d+)\.\s+/m', '$1. ', $text) ?? $text;
+
+        // ── 13. Horizontal rules ──
+        $text = preg_replace('/^[-=\*]{3,}$/m', '───────────────', $text) ?? $text;
+
+        // ── 14. Clean up extra blank lines ──
+        $text = preg_replace('/\n{3,}/', "\n\n", $text) ?? $text;
+
+        return trim($text);
+    }
+
+    /**
+     * Convert Markdown tables to monospace format wrapped in <pre>.
      */
     public static function convertTables(string $text): string
     {
@@ -121,7 +170,6 @@ class TelegramFormatter
                 $table = trim($matches[0]);
                 $lines = explode("\n", $table);
 
-                // Parse rows
                 $rows = [];
                 $isSeparator = [];
                 foreach ($lines as $line) {
@@ -135,7 +183,6 @@ class TelegramFormatter
                     return $matches[0];
                 }
 
-                // Calculate column widths
                 $colCount = count($rows[0]);
                 $widths = array_fill(0, $colCount, 0);
                 foreach ($rows as $i => $row) {
@@ -147,7 +194,6 @@ class TelegramFormatter
                     }
                 }
 
-                // Build monospace table
                 $result = [];
                 foreach ($rows as $i => $row) {
                     if ($isSeparator[$i]) {
@@ -163,77 +209,18 @@ class TelegramFormatter
                     $result[] = implode(' │ ', $cells);
                 }
 
-                return "```\n" . implode("\n", $result) . "\n```";
+                return '<pre>' . implode("\n", $result) . '</pre>';
             },
             $text
         ) ?? $text;
     }
 
     /**
-     * Convert standard Markdown to Telegram MarkdownV2.
-     *
-     * Returns null if conversion fails (caller should use plain text).
+     * Escape HTML special characters.
      */
-    public static function toMarkdownV2(string $text): ?string
+    public static function escapeHtml(string $text): string
     {
-        try {
-            // Protect code blocks first
-            $codeBlocks = [];
-            $text = preg_replace_callback('/```[\s\S]*?```/', function ($m) use (&$codeBlocks) {
-                $key = '%%CODE_BLOCK_' . count($codeBlocks) . '%%';
-                $codeBlocks[$key] = $m[0];
-                return $key;
-            }, $text);
-
-            // Protect inline code
-            $inlineCodes = [];
-            $text = preg_replace_callback('/`[^`]+`/', function ($m) use (&$inlineCodes) {
-                $key = '%%INLINE_CODE_' . count($inlineCodes) . '%%';
-                $inlineCodes[$key] = $m[0];
-                return $key;
-            }, $text);
-
-            // Convert bold: **text** → *text*
-            $text = preg_replace('/\*\*(.+?)\*\*/', '*$1*', $text);
-
-            // Escape special characters in remaining text (outside protected blocks)
-            $text = self::escapeMarkdownV2($text);
-
-            // Restore protected blocks (unescape the %% markers)
-            $text = str_replace(
-                array_map(fn($k) => self::escapeMarkdownV2($k), array_keys($codeBlocks)),
-                array_values($codeBlocks),
-                $text
-            );
-            $text = str_replace(
-                array_map(fn($k) => self::escapeMarkdownV2($k), array_keys($inlineCodes)),
-                array_values($inlineCodes),
-                $text
-            );
-
-            // Also try direct replacement (in case escaping didn't change placeholder)
-            foreach ($codeBlocks as $key => $value) {
-                $text = str_replace($key, $value, $text);
-            }
-            foreach ($inlineCodes as $key => $value) {
-                $text = str_replace($key, $value, $text);
-            }
-
-            return $text;
-        } catch (\Throwable) {
-            return null;
-        }
-    }
-
-    /**
-     * Escape special characters for MarkdownV2.
-     */
-    public static function escapeMarkdownV2(string $text): string
-    {
-        foreach (self::ESCAPE_CHARS as $char) {
-            $text = str_replace($char, '\\' . $char, $text);
-        }
-        return $text;
+        return htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8', false);
     }
 
     /**
@@ -241,21 +228,13 @@ class TelegramFormatter
      */
     public static function stripMarkdown(string $text): string
     {
-        // Remove code blocks
         $text = preg_replace('/```[\s\S]*?```/', '', $text);
-        // Remove inline code
         $text = preg_replace('/`([^`]+)`/', '$1', $text);
-        // Remove bold/italic
         $text = preg_replace('/\*{1,2}(.+?)\*{1,2}/', '$1', $text);
-        // Remove headers
         $text = preg_replace('/^#{1,6}\s+/m', '', $text);
-        // Remove table pipes
         $text = preg_replace('/\|/m', ' ', $text);
-        // Remove horizontal rules
         $text = preg_replace('/^[-=]{3,}$/m', '', $text);
-        // Clean up extra whitespace
         $text = preg_replace('/\n{3,}/', "\n\n", $text);
-
         return trim($text);
     }
 }

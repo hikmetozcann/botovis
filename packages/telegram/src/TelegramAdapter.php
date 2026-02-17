@@ -287,7 +287,7 @@ class TelegramAdapter
                     $stepText = TelegramFormatter::formatStep($thought, $action, $step['action_params'] ?? []);
                     if ($stepText) {
                         try {
-                            $this->api->sendMessage($chatId, $stepText, 'MarkdownV2');
+                            $this->api->sendMessage($chatId, $stepText, 'HTML');
                         } catch (\Throwable) {
                             $this->api->sendPlainMessage($chatId, "🔧 {$action}");
                         }
@@ -314,7 +314,7 @@ class TelegramAdapter
         try {
             $this->api->sendMessage($chatId, $formatted['text'], $formatted['parse_mode']);
         } catch (\Throwable) {
-            // Fallback to plain text if MarkdownV2 fails
+            // Fallback to plain text if HTML parsing fails
             $plain = TelegramFormatter::stripMarkdown($message);
             $this->api->sendPlainMessage($chatId, $plain);
         }
@@ -333,7 +333,7 @@ class TelegramAdapter
         );
 
         try {
-            $this->api->sendMessage($chatId, $text, 'MarkdownV2', $keyboard);
+            $this->api->sendMessage($chatId, $text, 'HTML', $keyboard);
         } catch (\Throwable) {
             // Fallback
             $plain = "⚠️ Yazma İşlemi\n\n" . $response->message;
