@@ -1,6 +1,66 @@
 # Artisan Komutları
 
-Botovis iki Artisan komutu sağlar: veritabanı keşfi ve CLI sohbeti.
+Botovis üç Artisan komutu sağlar: model yapılandırma, veritabanı keşfi ve CLI sohbeti.
+
+## botovis:models
+
+Projenizdeki Eloquent model'leri tarar ve `config/botovis.php` için yapılandırma üretir.
+
+### Kullanım
+
+```bash
+php artisan botovis:models
+```
+
+### Nasıl Çalışır
+
+1. `app/Models/` (veya belirtilen dizin) altındaki tüm Eloquent model'leri tarar
+2. İnteraktif multi-select ile hangi model'leri eklemek istediğinizi sorar
+3. Her model için izin seviyesini sorar (Tam CRUD / Sadece okuma / Okuma+Yazma / Özel)
+4. Kopyala-yapıştır için hazır config snippet'i çıktılar
+
+### Seçenekler
+
+```bash
+# Tüm modeller, tam CRUD izinleriyle
+php artisan botovis:models --all
+
+# Tüm modeller, sadece okuma
+php artisan botovis:models --all --read-only
+
+# Doğrudan config/botovis.php'ye yaz
+php artisan botovis:models --write
+
+# Farklı dizin tara
+php artisan botovis:models --path=src/Models
+```
+
+### Örnek Çıktı
+
+```
+🔍 Scanning for Eloquent models...
+
+Found 4 model(s):
+
+  1. App\Models\User
+  2. App\Models\Product
+  3. App\Models\Category
+  4. App\Models\Order
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 Add this to your config/botovis.php:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    'models' => [
+        \App\Models\Product::class => ['create', 'read', 'update', 'delete'],
+        \App\Models\Category::class => ['read'],
+        \App\Models\Order::class => ['read', 'update'],
+    ],
+
+💡 Tip: After updating config, run `php artisan botovis:discover` to verify.
+```
+
+---
 
 ## botovis:discover
 

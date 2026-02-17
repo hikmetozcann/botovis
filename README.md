@@ -163,6 +163,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 ### 5. Verify
 
 ```bash
+php artisan botovis:models     # Scan & configure models
 php artisan botovis:discover   # See discovered tables
 php artisan botovis:chat       # Test in terminal
 ```

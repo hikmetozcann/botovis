@@ -119,6 +119,14 @@ Or with custom options:
 
 ## Verification
 
+### Scan & Configure Models
+
+```bash
+php artisan botovis:models
+```
+
+Interactively select which Eloquent models Botovis should access and what permissions to grant. The command outputs a ready-to-paste config snippet. Use `--write` to update `config/botovis.php` directly.
+
 ### Check Schema Discovery
 
 ```bash

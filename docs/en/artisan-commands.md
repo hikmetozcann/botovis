@@ -1,6 +1,64 @@
 # Artisan Commands
 
-Botovis provides two Artisan commands for schema inspection and interactive testing.
+Botovis provides three Artisan commands for model setup, schema inspection, and interactive testing.
+
+## `botovis:models`
+
+Scan your project for Eloquent models and generate the `models` configuration for `config/botovis.php`.
+
+```bash
+php artisan botovis:models
+```
+
+### How It Works
+
+1. Scans `app/Models/` (or custom path) for all Eloquent model classes
+2. Presents an interactive multi-select to choose which models to expose
+3. For each model, asks what permissions to grant (Full CRUD / Read only / Read+Write / Custom)
+4. Outputs a ready-to-paste config snippet
+
+### Options
+
+```bash
+# Select all models with full CRUD permissions
+php artisan botovis:models --all
+
+# All models, read-only
+php artisan botovis:models --all --read-only
+
+# Write directly to config/botovis.php (no copy-paste needed)
+php artisan botovis:models --write
+
+# Scan a custom directory
+php artisan botovis:models --path=src/Models
+```
+
+### Example Output
+
+```
+🔍 Scanning for Eloquent models...
+
+Found 4 model(s):
+
+  1. App\Models\User
+  2. App\Models\Product
+  3. App\Models\Category
+  4. App\Models\Order
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 Add this to your config/botovis.php:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    'models' => [
+        \App\Models\Product::class => ['create', 'read', 'update', 'delete'],
+        \App\Models\Category::class => ['read'],
+        \App\Models\Order::class => ['read', 'update'],
+    ],
+
+💡 Tip: After updating config, run `php artisan botovis:discover` to verify.
+```
+
+---
 
 ## `botovis:discover`
 

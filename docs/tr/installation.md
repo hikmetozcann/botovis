@@ -106,6 +106,14 @@ Widget artık sayfanın sağ alt köşesinde görünecektir.
 
 ## Kurulumu Doğrulama
 
+### Model Tarama ve Yapılandırma
+
+```bash
+php artisan botovis:models
+```
+
+Projenizdeki Eloquent model'leri tarar, hangi model'leri eklemek istediğinizi sorar ve config snippet'i üretir. `--write` ile doğrudan `config/botovis.php`'ye yazabilirsiniz.
+
 ### Keşif Kontrolü
 
 ```bash

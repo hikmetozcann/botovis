@@ -4,7 +4,18 @@ All notable changes to Botovis will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.2] - 2026-02-17
+
+### Added
+- `botovis:models` command — scan Eloquent models, interactively select and assign permissions, generate config snippet or write directly to `config/botovis.php`
+- Support for `--all`, `--read-only`, `--write`, and `--path` flags in `botovis:models`
+
+## [0.1.1] - 2026-02-16
+
+### Fixed
+- Widget dist now bundled inside Laravel package for proper `vendor:publish` support
+
+## [0.1.0] - 2026-02-16
 
 ### Added
 - Agent mode with ReAct pattern and native tool calling
