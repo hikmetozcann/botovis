@@ -4,6 +4,18 @@ All notable changes to Botovis will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-02-17
+
+### Fixed
+- Confirmation messages now show human-readable labels instead of raw JSON dump (e.g. `✏️ Kayıt güncelle` with structured key-value display)
+- Typing indicator now refreshes every 4 seconds during agent processing (switched to streaming-based loop)
+- Removed stale MarkdownV2 references in callback query handler
+
+## [0.2.1] - 2026-02-17
+
+### Fixed
+- Switched Telegram formatter from MarkdownV2 to HTML parse mode — far more reliable rendering, no more broken bold/lists from aggressive escaping
+
 ## [0.2.0] - 2026-02-17
 
 ### Added
