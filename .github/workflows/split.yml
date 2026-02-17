@@ -23,6 +23,8 @@ jobs:
             split_repository: botovis-laravel
           - local_path: widget
             split_repository: botovis-widget
+          - local_path: telegram
+            split_repository: botovis-telegram
 
     name: Split ${{ matrix.package.local_path }}
 

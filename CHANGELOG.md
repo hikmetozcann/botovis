@@ -4,6 +4,18 @@ All notable changes to Botovis will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-02-17
+
+### Added
+- **Telegram channel adapter** (`botovis/botovis-telegram`) — control your Botovis-powered database from Telegram
+- `/connect` flow — link Telegram account via 6-digit code generated from app panel
+- Write confirmation via inline keyboard buttons (approve / reject)
+- Bot commands: `/start`, `/connect`, `/disconnect`, `/help`, `/tables`, `/reset`, `/status`
+- `botovis:telegram-setup` artisan command — configure webhook, verify bot, register menu commands
+- MarkdownV2 formatter with table-to-monospace conversion
+- Auto typing indicator during agent processing
+- Migration: `telegram_chat_id` column on users table
+
 ## [0.1.2] - 2026-02-17
 
 ### Added

@@ -1,6 +1,6 @@
 # Artisan Komutları
 
-Botovis üç Artisan komutu sağlar: model yapılandırma, veritabanı keşfi ve CLI sohbeti.
+Botovis dört Artisan komutu sağlar: model yapılandırma, veritabanı keşfi, CLI sohbeti ve Telegram yapılandırma.
 
 ## botovis:models
 
@@ -184,6 +184,56 @@ php artisan botovis:chat --simple
 - Konuşma geçmişi (oturum boyunca bağlamı korur)
 - Renkli çıktı (düşünceler, araçlar, sonuçlar farklı renklerde)
 - Paralel araç çağrıları
+
+---
+
+## botovis:telegram-setup
+
+> `botovis/botovis-telegram` paketi gerektirir.
+
+Telegram Bot webhook'unu ayarlar ve yönetir.
+
+### Kullanım
+
+```bash
+php artisan botovis:telegram-setup
+```
+
+### Ne Yapar
+
+1. `BOTOVIS_TELEGRAM_BOT_TOKEN` değerini Telegram `getMe` API'si ile doğrular
+2. Webhook URL'sini kaydeder (`APP_URL` + rota ön eki'nden otomatik algılanır)
+3. Bot menü komutlarını tanımlar (`/start`, `/connect`, `/help`, `/tables`, `/reset`, `/disconnect`, `/status`)
+
+### Seçenekler
+
+```bash
+# Özel webhook URL (APP_URL farklıysa)
+php artisan botovis:telegram-setup --url=https://yourdomain.com/botovis/telegram/webhook
+
+# Mevcut bot bilgisi ve webhook durumunu göster
+php artisan botovis:telegram-setup --info
+
+# Webhook'u kaldır
+php artisan botovis:telegram-setup --remove
+```
+
+### Örnek Çıktı
+
+```
+🤖 Botovis Telegram Setup
+━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Bot doğrulandı: @YourBotName
+✅ Webhook ayarlandı: https://yourdomain.com/botovis/telegram/webhook
+✅ Bot komutları kaydedildi (7 komut)
+
+🎉 Telegram entegrasyonu hazır!
+
+Kullanıcılar hesaplarını şu şekilde bağlayabilir:
+  1. Uygulama paneli → Telegram bölümü → Kod Oluştur
+  2. Bota mesaj: /connect <6-haneli-kod>
+```
 
 ---
 

@@ -65,6 +65,7 @@ Botovis is a monorepo with a framework-agnostic core and framework-specific inte
 | [`botovis/core`](packages/core) | Contracts, DTOs, agent loop, tool system — no framework dependencies | ✅ Stable |
 | [`botovis/botovis-laravel`](packages/laravel) | Laravel integration — Eloquent, Auth, Blade, Artisan | ✅ Stable |
 | [`@botovis/widget`](packages/widget) | TypeScript chat widget — Web Component, zero dependencies | ✅ Stable |
+| [`botovis/botovis-telegram`](packages/telegram) | Telegram Bot channel adapter — query your database from Telegram | ✅ New |
 | `@botovis/node` | Node.js / Express integration | 🔜 Planned |
 | `botovis/dotnet` | .NET / ASP.NET Core integration | 🔜 Planned |
 
@@ -88,7 +89,16 @@ Botovis is a monorepo with a framework-agnostic core and framework-specific inte
 │                   botovis/core                    │
 │  Contracts • DTOs • Agent Loop • Tool Registry    │
 │  Schema Models • Security Context • LLM Interface │
-└──────────────────────────────────────────────────┘
+└──────────┬──────────────────────────────┬─────────┘
+           │                              │
+┌──────────┴──────────┐  ┌────────────────┴────────┐
+│  Channel Adapters   │  │   (same brain,          │
+│  ┌───────────────┐  │  │    different mouth)      │
+│  │  Telegram ✅  │  │  │                          │
+│  │  Discord  🔜  │  │  │                          │
+│  │  Slack    🔜  │  │  │                          │
+│  └───────────────┘  │  │                          │
+└─────────────────────┘  └─────────────────────────┘
 ```
 
 ---
@@ -169,6 +179,25 @@ php artisan botovis:chat       # Test in terminal
 ```
 
 That's it. Visit your app and click the chat button.
+
+### Optional: Telegram Integration
+
+```bash
+composer require botovis/botovis-telegram
+php artisan vendor:publish --tag=botovis-telegram-config
+php artisan vendor:publish --tag=botovis-telegram-migrations
+php artisan migrate
+```
+
+```env
+BOTOVIS_TELEGRAM_ENABLED=true
+BOTOVIS_TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+BOTOVIS_TELEGRAM_WEBHOOK_SECRET=your-random-secret
+```
+
+```bash
+php artisan botovis:telegram-setup
+```
 
 → Full guide: [docs/en/installation.md](docs/en/installation.md)
 

@@ -1,6 +1,6 @@
 # Artisan Commands
 
-Botovis provides three Artisan commands for model setup, schema inspection, and interactive testing.
+Botovis provides four Artisan commands for model setup, schema inspection, interactive testing, and Telegram configuration.
 
 ## `botovis:models`
 
@@ -173,6 +173,54 @@ You: Create a new category called "Toys"
 🔧 Will use: create_record(table: categories, data: {name: "Toys"})
 
 ⚠️ Confirm? Create new record in 'categories' with name='Toys' [y/N]:
+```
+
+---
+
+## `botovis:telegram-setup`
+
+> Requires the `botovis/botovis-telegram` package.
+
+Set up and manage the Telegram Bot webhook for Botovis.
+
+```bash
+php artisan botovis:telegram-setup
+```
+
+### What It Does
+
+1. Verifies your `BOTOVIS_TELEGRAM_BOT_TOKEN` by calling the Telegram `getMe` API
+2. Registers the webhook URL (auto-detected from `APP_URL` + route prefix)
+3. Sets up bot menu commands (`/start`, `/connect`, `/help`, `/tables`, `/reset`, `/disconnect`, `/status`)
+
+### Options
+
+```bash
+# Custom webhook URL (if APP_URL differs from public URL)
+php artisan botovis:telegram-setup --url=https://yourdomain.com/botovis/telegram/webhook
+
+# Show current bot info & webhook status
+php artisan botovis:telegram-setup --info
+
+# Remove the webhook
+php artisan botovis:telegram-setup --remove
+```
+
+### Example Output
+
+```
+🤖 Botovis Telegram Setup
+━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Bot verified: @YourBotName
+✅ Webhook set: https://yourdomain.com/botovis/telegram/webhook
+✅ Bot commands registered (7 commands)
+
+🎉 Telegram integration is ready!
+
+Users can link their accounts by:
+  1. Opening your app panel → Telegram section → Generate Code
+  2. Messaging the bot: /connect <6-digit-code>
 ```
 
 ---
